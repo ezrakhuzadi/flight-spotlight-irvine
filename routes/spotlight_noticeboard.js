@@ -57,324 +57,247 @@ router.get("/", (req, res) => {
 });
 
 router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, response, next) => {
-
   const userProfile = await req.oidc.fetchUserInfo();
-  let req_query = req.query;
+  const { start_date: s_date, end_date: e_date, page = 0 } = req.query;
   const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
   const bing_key = process.env.BING_KEY || 'get-yours-at-https://www.bingmapsportal.com/';
   const mapbox_key = process.env.MAPBOX_KEY || 'thisIsMyAccessToken';
   const mapbox_id = process.env.MAPBOX_ID || 'this_is_my_mapbox_map_id';
-  let s_date = req_query.start_date;
-  let page = 0;
-  function isValidDate(d) {
-    return d instanceof Date && !isNaN(d);
-  }
-  try {
-    page = req_query.page;
-  } catch (err) {
 
-  }
-  let e_date = req_query.end_date;
-  try {
-    s_dt = s_date.split('-');
-    start_date = new Date(s_dt[0], s_dt[1], s_dt[2]);
-  } catch (error) {
-    start_date = 0;
-  }
-  try {
-    e_dt = e_date.split('-');
-    end_date = new Date(e_dt[0], e_dt[1], e_dt[2]);
-  } catch (error) {
-    end_date = 0;
-  }
+  const parseDate = (dateStr) => {
+    try {
+      const [year, month, day] = dateStr.split('-');
+      return new Date(year, month, day);
+    } catch {
+      return 0;
+    }
+  };
 
-  if (isValidDate(start_date)) { } else { start_date = 0 };
-  if (isValidDate(end_date)) { } else { end_date = 0 };
+  const start_date = parseDate(s_date);
+  const end_date = parseDate(e_date);
 
-  if ((start_date == 0 || end_date == 0)) {
+  const isValidDate = (d) => d instanceof Date && !isNaN(d);
 
-    response.render('noticeboard-map', {
+  if (!isValidDate(start_date) || !isValidDate(end_date)) {
+    return response.render('noticeboard-map', {
       title: "Noticeboard",
-      userProfile: userProfile,
-      bing_key: bing_key,
-      mapbox_key: mapbox_key,
-      mapbox_id: mapbox_id,
+      userProfile,
+      bing_key,
+      mapbox_key,
+      mapbox_id,
       user: req.user,
       errors: {},
-      data: {
-        'results': [],
-        'successful': 'NA'
-      }
-    }, function (ren_err, html) {
-      response.send(html);
-    });
+      data: { 'results': [], 'successful': 'NA' }
+    }, (ren_err, html) => response.send(html));
+  }
 
-  } else {
-
+  try {
     const passport_token = await passport_helper.getPassportToken();
-    let cred = "Bearer " + passport_token;
-    let declaration_url = base_url + '/flight_declaration_ops/flight_declaration?start_date=' + s_date + '&end_date=' + e_date;
-    if (page) {
-      declaration_url += '&page=' + page;
-    }
+    const cred = `Bearer ${passport_token}`;
+    const declaration_url = `${base_url}/flight_declaration_ops/flight_declaration?start_date=${s_date}&end_date=${e_date}&page=${page}`;
 
-    axios.get(declaration_url, {
+    const blender_response = await axios.get(declaration_url, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': cred
       }
-    })
-      .then(function (blender_response) {
+    });
 
-        if (blender_response.status == 200) {
-
-          response.render('noticeboard-map', {
-            title: "Noticeboard",
-            userProfile: userProfile,
-            bing_key: bing_key,
-            mapbox_key: mapbox_key,
-            mapbox_id: mapbox_id,
-            user: req.user,
-            successful: 1,
-            errors: {},
-            data: blender_response.data
-          }, function (ren_err, html) {
-            response.send(html);
-          });
-
-        } else {
-          // console.log(blender_response);
-          if (err) return response.sendStatus(500);
-        }
-      }).catch(function (error) {
-
-        // console.log(error.data);
-        return response.sendStatus(500);
-      });
-
+    if (blender_response.status === 200) {
+      response.render('noticeboard-map', {
+        title: "Noticeboard",
+        userProfile,
+        bing_key,
+        mapbox_key,
+        mapbox_id,
+        user: req.user,
+        successful: 1,
+        errors: {},
+        data: blender_response.data
+      }, (ren_err, html) => response.send(html));
+    } else {
+      response.sendStatus(500);
+    }
+  } catch (error) {
+    console.error(error);
+    response.sendStatus(500);
   }
 }));
 
 
 router.get("/noticeboard/globe", requiresAuth(), asyncMiddleware(async (req, response, next) => {
-
   const userProfile = await req.oidc.fetchUserInfo();
   let req_query = req.query;
   const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
-
   const bing_key = process.env.BING_KEY || 'get-yours-at-https://www.bingmapsportal.com/';
   const mapbox_key = process.env.MAPBOX_KEY || 'thisIsMyAccessToken';
   const mapbox_id = process.env.MAPBOX_ID || 'this_is_my_mapbox_map_id';
   let s_date = req_query.start_date;
-  let page = 0;
-  function isValidDate(d) {
-    return d instanceof Date && !isNaN(d);
-  }
-  try {
-    page = req_query.page;
-  } catch (err) {
-
-  }
+  let page = req_query.page || 0;
   let e_date = req_query.end_date;
-  try {
-    s_dt = s_date.split('-');
-    start_date = new Date(s_dt[0], s_dt[1], s_dt[2]);
-  } catch (error) {
-    start_date = 0;
-  }
-  try {
-    e_dt = e_date.split('-');
-    end_date = new Date(e_dt[0], e_dt[1], e_dt[2]);
-  } catch (error) {
-    end_date = 0;
+
+  function parseDate(dateStr) {
+    try {
+      const [year, month, day] = dateStr.split('-');
+      return new Date(year, month, day);
+    } catch (error) {
+      return 0;
+    }
   }
 
-  if (isValidDate(start_date)) { } else { start_date = 0 };
-  if (isValidDate(end_date)) { } else { end_date = 0 };
+  const start_date = parseDate(s_date);
+  const end_date = parseDate(e_date);
 
-  if ((start_date == 0 || end_date == 0)) {
-
-    response.render('noticeboard-globe', {
+  if (!isValidDate(start_date) || !isValidDate(end_date)) {
+    return response.render('noticeboard-globe', {
       title: "Noticeboard",
-      userProfile: userProfile,
-      bing_key: bing_key,
-      mapbox_key: mapbox_key,
-      mapbox_id: mapbox_id,
+      userProfile,
+      bing_key,
+      mapbox_key,
+      mapbox_id,
       user: req.user,
       errors: {},
       data: {
         'results': [],
         'successful': 'NA'
       }
-    }, function (ren_err, html) {
-      response.send(html);
-    });
+    }, (ren_err, html) => response.send(html));
+  }
 
-  } else {
+  const passport_token = await passport_helper.getPassportToken();
+  const cred = "Bearer " + passport_token;
+  let declaration_url = `${base_url}/flight_declaration_ops/flight_declaration?start_date=${s_date}&end_date=${e_date}`;
+  if (page) declaration_url += `&page=${page}`;
 
-    const passport_token = await passport_helper.getPassportToken();
-    let cred = "Bearer " + passport_token;
-    let declaration_url = base_url + '/flight_declaration_ops/flight_declaration?start_date=' + s_date + '&end_date=' + e_date;
-    if (page) {
-      declaration_url += '&page=' + page;
+  axios.get(declaration_url, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': cred
     }
-
-    axios.get(declaration_url, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': cred
+  })
+    .then(blender_response => {
+      if (blender_response.status === 200) {
+        response.render('noticeboard-globe', {
+          title: "Noticeboard",
+          userProfile,
+          bing_key,
+          mapbox_key,
+          mapbox_id,
+          user: req.user,
+          successful: 1,
+          errors: {},
+          data: blender_response.data
+        }, (ren_err, html) => response.send(html));
+      } else {
+        response.sendStatus(500);
       }
     })
-      .then(function (blender_response) {
+    .catch(error => {
+      console.error(error);
+      response.sendStatus(500);
+    });
 
-        if (blender_response.status == 200) {
-
-          response.render('noticeboard-globe', {
-            title: "Noticeboard",
-            userProfile: userProfile,
-            bing_key: bing_key,
-            mapbox_key: mapbox_key,
-            mapbox_id: mapbox_id,
-            user: req.user,
-            successful: 1,
-            errors: {},
-            data: blender_response.data
-          }, function (ren_err, html) {
-            response.send(html);
-          });
-
-        } else {
-          // console.log(blender_response);
-          if (err) return response.sendStatus(500);
-        }
-      }).catch(function (error) {
-
-        // console.log(error.data);
-        return response.sendStatus(500);
-      });
-
+  function isValidDate(d) {
+    return d instanceof Date && !isNaN(d);
   }
 }));
 
 
 router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, next) => {
-
   const userProfile = await req.oidc.fetchUserInfo();
   const bing_key = process.env.BING_KEY || 'get-yours-at-https://www.bingmapsportal.com/';
   const mapbox_key = process.env.MAPBOX_KEY || 'thisIsMyAccessToken';
   const mapbox_id = process.env.MAPBOX_ID || 'this_is_my_mapbox_map_id';
-  let req_query = req.query;
-  let lat = req_query.lat;
-  let lng = req_query.lng;
-  function checkIfValidlatitudeAndlongitude(str) {
-    // Regular expression to check if string is a latitude and longitude
-    const regexExp = /^((\-?|\+?)?\d+(\.\d+)?),\s*((\-?|\+?)?\d+(\.\d+)?)$/gi;
+  let { lat, lng } = req.query;
 
+  function isValidLatLng(str) {
+    const regexExp = /^((\-?|\+?)?\d+(\.\d+)?),\s*((\-?|\+?)?\d+(\.\d+)?)$/gi;
     return regexExp.test(str);
   }
-  let lat_lng_str = lat + ',' + lng;
 
-  if (checkIfValidlatitudeAndlongitude(lat_lng_str)) { } else {
-    lat = 'x';
-    lng = 'x';
+  if (!isValidLatLng(`${lat},${lng}`)) {
+    lat = lng = 'x';
   }
 
-  if ((lat == 'x' && lng == 'x')) {
-    response.render('spotlight', {
-
+  if (lat === 'x' && lng === 'x') {
+    return response.render('spotlight', {
       title: "Spotlight",
-      userProfile: userProfile,
-      bing_key: bing_key,
-      mapbox_key: mapbox_key,
-      mapbox_id: mapbox_id,
+      userProfile,
+      bing_key,
+      mapbox_key,
+      mapbox_id,
       user: req.user,
       errors: {},
-      data: {
-        'successful': 'NA'
-      }
+      data: { 'successful': 'NA' }
+    });
+  }
+
+  const io = req.app.get('socketio');
+  const res = 7;
+  const h = h3.latLngToCell(lat, lng, res);
+  const geo_boundary = h3.cellToBoundary(h, true);
+  const aoi_hexagon = turf.polygon([geo_boundary]);
+  const email = userProfile.email;
+  const aoi_bbox = turf.bbox(aoi_hexagon);
+  const lat_lng_formatted_array = [aoi_bbox[1], aoi_bbox[0], aoi_bbox[3], aoi_bbox[2]];
+
+  createNewPollBlenderProcess({
+    "viewport": lat_lng_formatted_array,
+    "job_id": uuidv4(),
+    "job_type": 'poll_blender'
+  });
+  createNewADSBFeedProcess({
+    "viewport": lat_lng_formatted_array,
+    "job_id": uuidv4(),
+    "job_type": 'start_opensky_feed'
+  });
+  createNewBlenderDSSSubscriptionProcess({
+    "viewport": lat_lng_formatted_array,
+    "job_id": uuidv4(),
+    "job_type": 'create_dss_subscription'
+  });
+  createNewGeofenceProcess({
+    "viewport": lat_lng_formatted_array,
+    "job_id": uuidv4(),
+    "job_type": 'get_geo_fence'
+  });
+
+  try {
+    const geo_fence_query = tile38_client.intersectsQuery('geo_fence').bounds(...lat_lng_formatted_array);
+    const geo_fence_results = await geo_fence_query.execute();
+    io.sockets.in(email).emit("message", {
+      'type': 'message',
+      "alert_type": "aoi_geo_fence",
+      "results": geo_fence_results
     });
 
-  } else {
-
-    const io = req.app.get('socketio');
-    const res = 7;
-    const h = h3.latLngToCell(lat, lng, res);
-    const geo_boundary = h3.cellToBoundary(h, true);
-    const aoi_hexagon = turf.polygon([geo_boundary]);
-    const email = userProfile.email;
-    const aoi_bbox = turf.bbox(aoi_hexagon);
-
-    const lat_lng_formatted_array = [aoi_bbox[1], aoi_bbox[0], aoi_bbox[3], aoi_bbox[2]]
-
-    // TODO: Get geofences that intersect this BBOX
-    // TODO: Start a job for 30 seconds to poll data from Blender    
-    createNewPollBlenderProcess({
-      "viewport": lat_lng_formatted_array,
-      "job_id": uuidv4(),
-      "job_type": 'poll_blender'
-    });
-    createNewADSBFeedProcess({
-      "viewport": lat_lng_formatted_array,
-      "job_id": uuidv4(),
-      "job_type": 'start_opensky_feed'
-    });
-    createNewBlenderDSSSubscriptionProcess({
-      "viewport": lat_lng_formatted_array,
-      "job_id": uuidv4(),
-      "job_type": 'create_dss_subscription'
-    });
-
-    createNewGeofenceProcess({
-      "viewport": lat_lng_formatted_array,
-      "job_id": uuidv4(),
-      "job_type": 'get_geo_fence'
-    });
-
-    // const area = turf.area(aoi_hexagon);
-    // Query the Geozone database and see if the flight intersects the geozone
-    let geo_fence_query = tile38_client.intersectsQuery('geo_fence').bounds(lat_lng_formatted_array[1], lat_lng_formatted_array[0], lat_lng_formatted_array[3], lat_lng_formatted_array[2]);
-    geo_fence_query.execute().then(results => {
-      // Send Geozones to UI
-      io.sockets.in(email).emit("message", {
-        'type': 'message',
-        "alert_type": "aoi_geo_fence",
-        "results": results
+    geo_fence_results.objects.forEach(geo_fence_element => {
+      const geo_fence_bbox = turf.bbox(geo_fence_element.object);
+      const geo_live_fence_query = tile38_client.intersectsQuery('observation').detect('enter', 'exit').bounds(...geo_fence_bbox);
+      const geo_fence_stream = geo_live_fence_query.executeFence((err, geo_fence_results) => {
+        if (err) {
+          console.error("something went wrong! " + err);
+        } else {
+          const status = `${geo_fence_results.id}: ${geo_fence_results.detect} geo fence area`;
+          io.sockets.in(email).emit("message", {
+            'type': 'message',
+            "alert_type": "geo_fence_crossed",
+            "results": status
+          });
+        }
       });
-      return results;
-    }).then(geo_fence => {
-      // Setup a Geofence for the results 
-      for (let index = 0; index < geo_fence.objects.length; index++) {
-        const geo_fence_element = geo_fence.objects[index].object;
-        let geo_fence_bbox = turf.bbox(geo_fence_element);
-        let geo_live_fence_query = tile38_client.intersectsQuery('observation').detect('enter', 'exit').bounds(geo_fence_bbox[1], geo_fence_bbox[0], geo_fence_bbox[3], geo_fence_bbox[2]);
-        let geo_fence_stream = geo_live_fence_query.executeFence((err, geo_fence_results) => {
-          if (err) {
-            console.error("something went wrong! " + err);
-          } else {
-            let status = geo_fence_results.id + ": " + geo_fence_results.detect + " geo fence area";
-            io.sockets.in(email).emit("message", {
-              'type': 'message',
-              "alert_type": "geo_fence_crossed",
-              "results": status
-            });
-          }
-        });
-        geo_fence_stream.onClose(() => {
-          console.log("Close Geozone geofence with id:" + geo_fence_element['id']);
-        });
 
-        setTimeout(() => {
-          geo_fence_stream.close();
-        }, 30000);
+      geo_fence_stream.onClose(() => {
+        console.log(`Close Geozone geofence with id: ${geo_fence_element.object.id}`);
+      });
 
-
-      }
-    }).catch(err => {
-      console.log("something went wrong! " + err);
+      setTimeout(() => {
+        geo_fence_stream.close();
+      }, 30000);
     });
-    let aoi_query = tile38_client.intersectsQuery('observation').bounds(lat_lng_formatted_array[1], lat_lng_formatted_array[0], lat_lng_formatted_array[3], lat_lng_formatted_array[2]).detect('inside');
-    let flight_aoi_fence = aoi_query.executeFence((err, results) => {
 
+    const aoi_query = tile38_client.intersectsQuery('observation').bounds(...lat_lng_formatted_array).detect('inside');
+    const flight_aoi_fence = aoi_query.executeFence((err, results) => {
       if (err) {
         console.error("something went wrong! " + err);
       } else {
@@ -400,19 +323,23 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
 
     response.render('spotlight', {
       title: "Spotlight",
-      userProfile: userProfile,
-      bing_key: bing_key,
-      mapbox_key: mapbox_key,
-      mapbox_id: mapbox_id,
+      userProfile,
+      bing_key,
+      mapbox_key,
+      mapbox_id,
       user: req.user,
       errors: {},
       data: {
-        'successful': 1, 'aoi_hexagon': aoi_hexagon, "msg": "Scanning flights in AOI and Geofences for 60 seconds", "geo_fences": [], "flight_declarations": []
+        'successful': 1,
+        'aoi_hexagon': aoi_hexagon,
+        "msg": "Scanning flights in AOI and Geofences for 60 seconds",
+        "geo_fences": [],
+        "flight_declarations": []
       }
     });
-
-
-
+  } catch (err) {
+    console.log("something went wrong! " + err);
+    response.sendStatus(500);
   }
 
 }));
@@ -448,42 +375,32 @@ router.post("/set_air_traffic", checkJwt, jwtAuthz(['spotlight.write']), [
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return response.status(422).json({
-        errors: errors.array()
+      errors: errors.array()
       });
-    } else {
-
-      const req_body = req.body;
-      const lat_dd = req_body.lat_dd;
-      const lon_dd = req_body.lon_dd;
-      const altitude_mm = req_body.altitude_mm;
-      const traffic_source = req_body.traffic_source;
-      const source_type = req_body.source_type;
-      const icao_address = req_body.icao_address;
-      const obs_metadata = req_body.metadata;
-
-      try {
-        tile38_client.set('observation', icao_address, [lon_dd, lat_dd, altitude_mm], {
-          'source_type': source_type,
-          'traffic_source': traffic_source,
-          'metadata': JSON.stringify(obs_metadata)
-        }, {
-          expire: 300
-        });
-
-      } catch (err) {
-        console.log("Error " + err);
-      }
-      let metadata_key = icao_address + '-metadata';
-      // TODO: Set metatadata
-      async function set_metadata(obs_metadata) {
-        await redis_client.set(metadata_key, JSON.stringify(obs_metadata));
-        await redis_client.expire(metadata_key, 300);
-      }
-      set_metadata(obs_metadata);
-
-      response.send('OK');
-
     }
+
+    const { lat_dd, lon_dd, altitude_mm, traffic_source, source_type, icao_address, metadata: obs_metadata } = req.body;
+
+    try {
+      tile38_client.set('observation', icao_address, [lon_dd, lat_dd, altitude_mm], {
+      source_type,
+      traffic_source,
+      metadata: JSON.stringify(obs_metadata)
+      }, { expire: 300 });
+    } catch (err) {
+      console.error("Error:", err);
+    }
+
+    const metadata_key = `${icao_address}-metadata`;
+
+    async function setMetadata(metadata) {
+      await redis_client.set(metadata_key, JSON.stringify(metadata));
+      await redis_client.expire(metadata_key, 300);
+    }
+
+    setMetadata(obs_metadata);
+
+    response.send('OK');
   });
 
 router.get('/blender_status', requiresAuth(), function (req, response, next) {
@@ -577,170 +494,145 @@ router.get("/get_flight_declarations", requiresAuth(), (req, response, next) => 
 });
 
 router.post("/set_flight_approval/:uuid", requiresAuth(), asyncMiddleware(async (req, res, next) => {
-
-  let flight_declaration_uuid = req.params.uuid;
+  const flight_declaration_uuid = req.params.uuid;
   const is_uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(flight_declaration_uuid);
 
-  const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
+  if (!is_uuid) {
+    return res.status(400).send({ error: "Invalid UUID format" });
+  }
 
-  redis_key = 'blender_passport_token';
-  let approve_reject = req.body['approve_reject'];
-  let approved_by = req.body['approved_by'];
+  const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
+  const approve_reject = req.body['approve_reject'];
+  const approved_by = req.body['approved_by'];
   const passport_token = await passport_helper.getPassportToken();
 
-  let a_r = {
+  const a_r = {
     'is_approved': approve_reject,
     'approved_by': approved_by
   };
 
-  let url = base_url + '/flight_declaration_ops/flight_declaration_review/' + flight_declaration_uuid;
-  axios.put(url, JSON.stringify(a_r), {
+  const url = `${base_url}/flight_declaration_ops/flight_declaration_review/${flight_declaration_uuid}`;
 
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': "Bearer " + passport_token
-    }
-  })
-    .then(function (blender_response) {
-      if (blender_response.status == 200) {
-        res.send(blender_response.data);
-      } else {
-        // console.log(error);
-        res.send(blender_response.data);
+  try {
+    const blender_response = await axios.put(url, JSON.stringify(a_r), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${passport_token}`
       }
-    }).catch(function (error) {
-      console.log(error.data);
     });
+
+    if (blender_response.status === 200) {
+      res.send(blender_response.data);
+    } else {
+      res.status(blender_response.status).send(blender_response.data);
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
 
 }));
 
 router.post("/update_flight_state/:uuid", requiresAuth(), asyncMiddleware(async (req, res, next) => {
-
-  let flight_declaration_uuid = req.params.uuid;
+  const flight_declaration_uuid = req.params.uuid;
   const is_uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(flight_declaration_uuid);
 
-  const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
+  if (!is_uuid) {
+    return res.status(400).send({ error: "Invalid UUID format" });
+  }
 
-  redis_key = 'blender_passport_token';
-  let new_state = req.body['state'];
-  let submitted_by = req.body['submitted_by'];
+  const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
+  const new_state = req.body.state;
+  const submitted_by = req.body.submitted_by;
   const passport_token = await passport_helper.getPassportToken();
 
-  let a_r = {
-    'state': new_state,
-    'submitted_by': submitted_by
+  const payload = {
+    state: new_state,
+    submitted_by: submitted_by
   };
 
-  let url = base_url + '/flight_declaration_ops/flight_declaration_state/' + flight_declaration_uuid;
-  axios.put(url, JSON.stringify(a_r), {
+  const url = `${base_url}/flight_declaration_ops/flight_declaration_state/${flight_declaration_uuid}`;
 
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': "Bearer " + passport_token
-    }
-  })
-    .then(function (blender_response) {
-      if (blender_response.status == 200) {
-        res.send(blender_response.data);
-      } else {
-        // console.log(error);
-        res.send(blender_response.data);
+  try {
+    const blender_response = await axios.put(url, JSON.stringify(payload), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${passport_token}`
       }
-    }).catch(function (error) {
-      console.log(error.data);
     });
+
+    if (blender_response.status === 200) {
+      res.send(blender_response.data);
+    } else {
+      res.status(blender_response.status).send(blender_response.data);
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
 
 }));
 
 
 
 router.get("/noticeboard", requiresAuth(), asyncMiddleware(async (req, response, next) => {
-
   const userProfile = await req.oidc.fetchUserInfo();
-  let req_query = req.query;
+  const { start_date: s_date, end_date: e_date, page = 0 } = req.query;
   const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
-  let s_date = req_query.start_date;
-  let page = 0;
-  function isValidDate(d) {
-    return d instanceof Date && !isNaN(d);
-  }
-  try {
-    page = req_query.page;
-  } catch (err) {
 
-  }
-  let e_date = req_query.end_date;
+  const parseDate = (dateStr) => {
+    try {
+      const [year, month, day] = dateStr.split('-');
+      return new Date(year, month, day);
+    } catch {
+      return 0;
+    }
+  };
 
-  try {
-    s_dt = s_date.split('-');
-    start_date = new Date(s_dt[0], s_dt[1], s_dt[2]);
-  } catch (error) {
-    start_date = 0;
-  }
-  try {
-    e_dt = e_date.split('-');
-    end_date = new Date(e_dt[0], e_dt[1], e_dt[2]);
-  } catch (error) {
-    end_date = 0;
-  }
+  const start_date = parseDate(s_date);
+  const end_date = parseDate(e_date);
 
-  if (isValidDate(start_date)) { } else { start_date = 0 };
-  if (isValidDate(end_date)) { } else { end_date = 0 };
+  const isValidDate = (d) => d instanceof Date && !isNaN(d);
 
-  if ((start_date == 0 || end_date == 0)) {
-
-    response.render('noticeboard-text', {
+  if (!isValidDate(start_date) || !isValidDate(end_date)) {
+    return response.render('noticeboard-text', {
       ...ejsUtilities,
       title: "Noticeboard",
-      userProfile: userProfile,
+      userProfile,
       user: req.user,
       errors: {},
-      data: {
-        'results': [],
-        'successful': 'NA'
-      }
-    }, function (ren_err, html) {
-      response.send(html);
-    });
+      data: { 'results': [], 'successful': 'NA' }
+    }, (ren_err, html) => response.send(html));
+  }
 
-  } else {
-
+  try {
     const passport_token = await passport_helper.getPassportToken();
-    let cred = "Bearer " + passport_token;
-    let declaration_url = base_url + '/flight_declaration_ops/flight_declaration?start_date=' + s_date + '&end_date=' + e_date;
-    if (page) {
-      declaration_url += '&page=' + page;
-    }
-    axios.get(declaration_url, {
+    const cred = `Bearer ${passport_token}`;
+    const declaration_url = `${base_url}/flight_declaration_ops/flight_declaration?start_date=${s_date}&end_date=${e_date}&page=${page}`;
+
+    const blender_response = await axios.get(declaration_url, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': cred
       }
-    })
-      .then(function (blender_response) {
+    });
 
-        if (blender_response.status == 200) {
-
-          response.render('noticeboard-text', {
-            ...ejsUtilities,
-            title: "Noticeboard",
-            userProfile: userProfile,
-            user: req.user,
-            successful: 1,
-            errors: {},
-            data: blender_response.data
-          }, function (ren_err, html) {
-            response.send(html);
-          });
-
-        } else {
-          if (err) return response.sendStatus(500);
-        }
-      }).catch(function (error) {
-        console.debug(error);
-        return response.sendStatus(500);
-      });
-
+    if (blender_response.status === 200) {
+      response.render('noticeboard-text', {
+        ...ejsUtilities,
+        title: "Noticeboard",
+        userProfile,
+        user: req.user,
+        successful: 1,
+        errors: {},
+        data: blender_response.data
+      }, (ren_err, html) => response.send(html));
+    } else {
+      response.sendStatus(500);
+    }
+  } catch (error) {
+    console.error(error);
+    response.sendStatus(500);
   }
 }));
 

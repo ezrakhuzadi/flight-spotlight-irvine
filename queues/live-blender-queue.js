@@ -33,8 +33,8 @@ dssSubscriptionQueue.process(createBlenderDSSSubscriptionProcess);
 
 const createNewBlenderDSSSubscriptionProcess = (dssSubsriptionDetails) => {
   dssSubscriptionQueue.add(dssSubsriptionDetails, {
-  attempts: 1,
-});
+    attempts: 1,
+  });
 };
 
 
@@ -42,14 +42,14 @@ adsbBlenderQueue.process(createBlenderADSBFeedProcess);
 
 const createNewADSBFeedProcess = (adsbRequestDetails) => {
   adsbBlenderQueue.add(adsbRequestDetails, {
-  attempts: 1,
-});
+    attempts: 1,
+  });
 };
 
 pollBlenderQueue.process(pollBlenderProcess);
 
 const createNewPollBlenderProcess = (pollBlenderDetails) => {
-    pollBlenderQueue.add(pollBlenderDetails, {
+  pollBlenderQueue.add(pollBlenderDetails, {
     attempts: 2,
   });
 };

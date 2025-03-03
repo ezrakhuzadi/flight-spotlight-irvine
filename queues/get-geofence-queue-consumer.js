@@ -36,41 +36,31 @@ function setGeoFenceLocally(geo_fence_detail) {
 }
 
 const getGeoFenceConsumerProcess = async (job) => {
+    try {
+        const passport_token = await passport_helper.getPassportToken();
+        const cred = `Bearer ${passport_token}`;
+        const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
+        const viewport = job.data.viewport.join(',');
+        const geo_fence_url = `${base_url}/geo_fence_ops/geo_fence?view=${viewport}`;
 
-    const passport_token = await passport_helper.getPassportToken();
-    let cred = "Bearer " + passport_token;
+        const axios_instance = axios.create({
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': cred
+            }
+        });
 
-    const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
-
-    const view = job.data.viewport;
-    const job_id = job.data.job_id;
-    const job_type = job.data.job_type;
-
-    // const v = [view[1], view[0], view[3], view[2]]; // Flip co-ordinates for Turf
-    const viewport = view.join(',');
-    let axios_instance = axios.create({
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': cred
-        }
-    });
-
-    let geo_fence_url = base_url + '/geo_fence_ops/geo_fence?view=' + viewport;
-
-    axios_instance.get(geo_fence_url).then(function (blender_response) {
-        // response.send(blender_response.data);
+        const blender_response = await axios_instance.get(geo_fence_url);
         const geo_fences = blender_response.data;
-        if (geo_fences['results']) {
-            setGeoFenceLocally(geo_fences['results']);
+
+        if (geo_fences.results) {
+            setGeoFenceLocally(geo_fences.results);
         }
 
-
-    }).catch(function (blender_error) {
-        console.log("Error in retrieveing data from Blender")
-        console.log(blender_error);
-    });
-
-    console.log('Geozone query Complete..');
+        console.log('Geozone query Complete..');
+    } catch (error) {
+        console.error("Error in retrieving data from Blender", error);
+    }
 };
 
 module.exports = {
