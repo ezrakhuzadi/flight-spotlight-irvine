@@ -41,6 +41,13 @@
               <div class="bg-light rounded">
                 <h5 id="">Error Details from Blender</h5>
                 <p><%= error.data %></p>
+                <ul>
+                  <% if (error.errors && error.errors.length > 0) { %>
+                    <% error.errors.forEach(err => { %>
+                      <li><%= err %></li>
+                    <% }) %>
+                  <% } %>
+                </ul>
                 </div>
               
             </li>

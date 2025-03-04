@@ -53,6 +53,7 @@ router.post('/launchpad/submit-declaration', flight_operation_validate, requires
   const errors = validationResult(req);
   const operators = process.env.OPERATORS || "";
 
+
   if (!errors.isEmpty()) {
     return res.render('launchpad', {
       data: req.body,
@@ -114,12 +115,17 @@ router.post('/launchpad/submit-declaration', flight_operation_validate, requires
       return res.render('launchpad-operation-submission-status', {
         title: "Thank you for your submission!",
         errors: [],
-        data: response.data
+        data: response.data,
+        user: req.user,
+        userProfile: await req.oidc.fetchUserInfo()
       });
     } else {
       return res.render('error-in-submission', {
         title: "Error in submission",
         errors: response.data,
+
+        user: req.user,
+        userProfile: await req.oidc.fetchUserInfo(),
         data: {}
       });
     }
@@ -128,7 +134,10 @@ router.post('/launchpad/submit-declaration', flight_operation_validate, requires
     return res.render('launchpad-operation-submission-status', {
       title: "Error in your submission!",
       errors: [{ message: error.message, data: error_message }],
-      data: {}
+      data: {},
+
+      user: req.user,
+      userProfile: await req.oidc.fetchUserInfo()
     });
   }
 });
@@ -143,6 +152,8 @@ router.get('/launchpad', requiresAuth(), async (req, response, next) => {
 
 router.get('/launchpad/operation-status/:uuid', asyncMiddleware(async (req, res, next) => {
   const operationUUID = req.params.uuid;
+
+  const userProfile = await req.oidc.fetchUserInfo();
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationUUID);
 
   if (!isUUID) {
@@ -165,12 +176,14 @@ router.get('/launchpad/operation-status/:uuid', asyncMiddleware(async (req, res,
       return res.render('launchpad-status', {
         title: "Operation Status",
         errors: {},
-        data: blenderResponse.data
+        data: blenderResponse.data,
+        'userProfile': userProfile
       });
     } else {
       return res.render('error-in-submission', {
         title: "Error in submission",
         errors: blenderResponse.data,
+        'userProfile': userProfile,
         data: {}
       });
     }
@@ -178,7 +191,8 @@ router.get('/launchpad/operation-status/:uuid', asyncMiddleware(async (req, res,
     return res.render('error-in-submission', {
       title: "Error in submission",
       errors: [{ message: error.message }],
-      data: {}
+      data: {},
+      'userProfile': userProfile
     });
   }
 

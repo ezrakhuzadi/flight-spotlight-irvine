@@ -58,7 +58,7 @@ router.get("/", (req, res) => {
 
 router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, response, next) => {
   const userProfile = await req.oidc.fetchUserInfo();
-  const { start_date: s_date, end_date: e_date, page = 0 } = req.query;
+  const { start_date: s_date, end_date: e_date, page = 1 } = req.query;
   const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
   const bing_key = process.env.BING_KEY || 'get-yours-at-https://www.bingmapsportal.com/';
   const mapbox_key = process.env.MAPBOX_KEY || 'thisIsMyAccessToken';
@@ -85,7 +85,7 @@ router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, respo
       bing_key,
       mapbox_key,
       mapbox_id,
-      user: req.user,
+      
       errors: {},
       data: { 'results': [], 'successful': 'NA' }
     }, (ren_err, html) => response.send(html));
@@ -110,7 +110,7 @@ router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, respo
         bing_key,
         mapbox_key,
         mapbox_id,
-        user: req.user,
+        
         successful: 1,
         errors: {},
         data: blender_response.data
@@ -133,7 +133,7 @@ router.get("/noticeboard/globe", requiresAuth(), asyncMiddleware(async (req, res
   const mapbox_key = process.env.MAPBOX_KEY || 'thisIsMyAccessToken';
   const mapbox_id = process.env.MAPBOX_ID || 'this_is_my_mapbox_map_id';
   let s_date = req_query.start_date;
-  let page = req_query.page || 0;
+  let page = req_query.page || 1;
   let e_date = req_query.end_date;
 
   function parseDate(dateStr) {
@@ -155,7 +155,6 @@ router.get("/noticeboard/globe", requiresAuth(), asyncMiddleware(async (req, res
       bing_key,
       mapbox_key,
       mapbox_id,
-      user: req.user,
       errors: {},
       data: {
         'results': [],
@@ -183,7 +182,6 @@ router.get("/noticeboard/globe", requiresAuth(), asyncMiddleware(async (req, res
           bing_key,
           mapbox_key,
           mapbox_id,
-          user: req.user,
           successful: 1,
           errors: {},
           data: blender_response.data
@@ -577,7 +575,7 @@ router.post("/update_flight_state/:uuid", requiresAuth(), asyncMiddleware(async 
 
 router.get("/noticeboard", requiresAuth(), asyncMiddleware(async (req, response, next) => {
   const userProfile = await req.oidc.fetchUserInfo();
-  const { start_date: s_date, end_date: e_date, page = 0 } = req.query;
+  const { start_date: s_date, end_date: e_date, page = 1 } = req.query;
   const base_url = process.env.BLENDER_BASE_URL || 'http://local.test:8000';
 
   const parseDate = (dateStr) => {

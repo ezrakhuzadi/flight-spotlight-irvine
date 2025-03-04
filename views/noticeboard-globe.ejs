@@ -23,6 +23,7 @@
 <body>
     <%- include('navigation') -%>
         <div class="container-fluid information">
+            <br>
             <div class="row">
                 <div class="col-sm-4 col-md-4 main">
                     <div class="row">
@@ -57,12 +58,12 @@
                                                 <%= cur_declaration.originating_party %>
                                             </a>&nbsp;<small class="text-muted">
                                                 <%= op_types[cur_declaration.type_of_operation] %>
-                                                <%if (user.role=='operator' ) { %>
+                                                <%if (userProfile.role=='operator' ) { %>
                                                     <%if (cur_declaration.is_approved =='1'){ %>&nbsp;&nbsp;<i class="bi bi-check-circle"></i> <% } else {%>&nbsp;&nbsp;<i class="bi bi-x-square"></i><%}%>
                                                 <% } %>
                                             </small></h6>
 
-                                        <%if (user.role=='authority' ) { %>
+                                        <%if (userProfile.role=='authority' ) { %>
                                             <div class="form-check form-switch"><input class="form-check-input"
                                                     type="checkbox" onchange="set_approval('<%- cur_declaration.id %>')"
                                                     id="<%- cur_declaration.id %>" <% if (cur_declaration.is_approved)
@@ -178,7 +179,6 @@
         }
 
 
-        let user = <%- JSON.stringify(userProfile) %>;
         // var data = <% JSON.stringify(data) %>;
         $('#datepicker').on('changeDate', (event) => {
             // save checkin date
@@ -194,7 +194,7 @@
 
         const s_parse = Date.parse(start_date);
         const timeline_start = new Date(s_parse);
-        const user_name = '<%= user.email %>';
+        const user_name = '<%= userProfile.email %>';
         const bing = new Cesium.ImageryLayer.fromProviderAsync(
             Cesium.BingMapsImageryProvider.fromUrl(
         "https://dev.virtualearth.net", {

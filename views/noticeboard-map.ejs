@@ -54,7 +54,7 @@
                                                 <%= cur_declaration.originating_party %>
                                             </a>&nbsp;<small class="text-muted">
                                                 <%= op_types[cur_declaration.type_of_operation] %>
-                                                <%if (user.role=='operator' ) { %>
+                                                <%if (userProfile.role=='operator' ) { %>
                                                     <%if (cur_declaration.is_approved =='1'){ %>&nbsp;&nbsp;<i class="bi bi-check-circle"></i> <% } else {%>&nbsp;&nbsp;<i class="bi bi-x-square"></i><%}%>
                                                 <% } %>
                                             </small>
@@ -182,7 +182,6 @@
         }
 
 
-        let user = <%- JSON.stringify(userProfile) %>;
         // var data = <% JSON.stringify(data) %>;
         $('#datepicker').on('changeDate', (event) => {
             // save checkin date
@@ -198,7 +197,7 @@
 
         const s_parse = Date.parse(start_date);
         const timeline_start = new Date(s_parse);
-        const user_name = '<%= user.email %>';
+        
         var orignating_party_popup;
         var start_time_popup;
         var end_time_popup;
