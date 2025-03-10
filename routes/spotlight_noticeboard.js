@@ -13,13 +13,16 @@ const jwksRsa = require('jwks-rsa');
 const jwtAuthz = require('express-jwt-authz');
 // const request = require('request');
 const turf = require("@turf/turf");
-const h3 = require("h3-js");
+
 require("dotenv").config();
-const qs = require('qs');
+
 const asyncMiddleware = require('../util/asyncMiddleware');
 const axios = require('axios');
 let geojsonhint = require("@mapbox/geojsonhint");
 let passport_helper = require('./passport_helper');
+
+
+const { sendStdMsg } = require('../util/io');
 
 const { requiresAuth } = require('express-openid-connect');
 const { createNewPollBlenderProcess, createNewADSBFeedProcess, createNewBlenderDSSSubscriptionProcess, createNewGeofenceProcess } = require("../queues/live-blender-queue");
@@ -85,7 +88,7 @@ router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, respo
       bing_key,
       mapbox_key,
       mapbox_id,
-      
+
       errors: {},
       data: { 'results': [], 'successful': 'NA' }
     }, (ren_err, html) => response.send(html));
@@ -110,7 +113,7 @@ router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, respo
         bing_key,
         mapbox_key,
         mapbox_id,
-        
+
         successful: 1,
         errors: {},
         data: blender_response.data
@@ -224,23 +227,23 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
       bing_key,
       mapbox_key,
       mapbox_id,
-      user: req.user,
+
       errors: {},
       data: { 'successful': 'NA' }
     });
   }
+  lat = parseFloat(lat);
+  lng = parseFloat(lng);
 
-  const io = req.app.get('socketio');
-  const res = 7;
-  const h = h3.latLngToCell(lat, lng, res);
-  const geo_boundary = h3.cellToBoundary(h, true);
-  const aoi_hexagon = turf.polygon([geo_boundary]);
+  const aoi_buffer = turf.buffer(turf.point([lng, lat]), 2.5, { units: 'kilometers' });
+
   const email = userProfile.email;
-  const aoi_bbox = turf.bbox(aoi_hexagon);
+  const aoi_bbox = turf.bbox(aoi_buffer);
   const lat_lng_formatted_array = [aoi_bbox[1], aoi_bbox[0], aoi_bbox[3], aoi_bbox[2]];
 
   createNewPollBlenderProcess({
     "viewport": lat_lng_formatted_array,
+    "room": email,
     "job_id": uuidv4(),
     "job_type": 'poll_blender'
   });
@@ -256,89 +259,27 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
   });
   createNewGeofenceProcess({
     "viewport": lat_lng_formatted_array,
+    "userEmail": email,
     "job_id": uuidv4(),
     "job_type": 'get_geo_fence'
   });
 
-  try {
-    const geo_fence_query = tile38_client.intersectsQuery('geo_fence').bounds(...lat_lng_formatted_array);
-    const geo_fence_results = await geo_fence_query.execute();
-    io.sockets.in(email).emit("message", {
-      'type': 'message',
-      "alert_type": "aoi_geo_fence",
-      "results": geo_fence_results
-    });
 
-    geo_fence_results.objects.forEach(geo_fence_element => {
-      const geo_fence_bbox = turf.bbox(geo_fence_element.object);
-      const geo_live_fence_query = tile38_client.intersectsQuery('observation').detect('enter', 'exit').bounds(...geo_fence_bbox);
-      const geo_fence_stream = geo_live_fence_query.executeFence((err, geo_fence_results) => {
-        if (err) {
-          console.error("something went wrong! " + err);
-        } else {
-          const status = `${geo_fence_results.id}: ${geo_fence_results.detect} geo fence area`;
-          io.sockets.in(email).emit("message", {
-            'type': 'message',
-            "alert_type": "geo_fence_crossed",
-            "results": status
-          });
-        }
-      });
-
-      geo_fence_stream.onClose(() => {
-        console.log(`Close Geozone geofence with id: ${geo_fence_element.object.id}`);
-      });
-
-      setTimeout(() => {
-        geo_fence_stream.close();
-      }, 30000);
-    });
-
-    const aoi_query = tile38_client.intersectsQuery('observation').bounds(...lat_lng_formatted_array).detect('inside');
-    const flight_aoi_fence = aoi_query.executeFence((err, results) => {
-      if (err) {
-        console.error("something went wrong! " + err);
-      } else {
-        io.sockets.in(email).emit("message", {
-          'type': 'message',
-          "alert_type": "aoi",
-          "results": results
-        });
-      }
-    });
-
-    flight_aoi_fence.onClose(() => {
-      console.debug("AOI streaming closed");
-      io.sockets.in(email).emit("message", {
-        'type': 'message',
-        "alert_type": "aoi_closed",
-      });
-    });
-
-    setTimeout(() => {
-      flight_aoi_fence.close();
-    }, 60000);
-
-    response.render('spotlight', {
-      title: "Spotlight",
-      userProfile,
-      bing_key,
-      mapbox_key,
-      mapbox_id,
-      user: req.user,
-      errors: {},
-      data: {
-        'successful': 1,
-        'aoi_hexagon': aoi_hexagon,
-        "msg": "Scanning flights in AOI and Geofences for 60 seconds",
-        "geo_fences": [],
-        "flight_declarations": []
-      }
-    });
-  } catch (err) {
-    console.log("something went wrong! " + err);
-    response.sendStatus(500);
-  }
+  response.render('spotlight', {
+    title: "Spotlight",
+    userProfile,
+    bing_key,
+    mapbox_key,
+    mapbox_id,
+    errors: {},
+    data: {
+      'successful': 1,
+      'aoi_buffer': aoi_buffer,
+      "msg": "Scanning flights in AOI and Geofences for 60 seconds",
+      "geo_fences": [],
+      "flight_declarations": []
+    }
+  });
 
 }));
 
@@ -373,7 +314,7 @@ router.post("/set_air_traffic", checkJwt, jwtAuthz(['spotlight.write']), [
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return response.status(422).json({
-      errors: errors.array()
+        errors: errors.array()
       });
     }
 
@@ -381,9 +322,9 @@ router.post("/set_air_traffic", checkJwt, jwtAuthz(['spotlight.write']), [
 
     try {
       tile38_client.set('observation', icao_address, [lon_dd, lat_dd, altitude_mm], {
-      source_type,
-      traffic_source,
-      metadata: JSON.stringify(obs_metadata)
+        source_type,
+        traffic_source,
+        metadata: JSON.stringify(obs_metadata)
       }, { expire: 300 });
     } catch (err) {
       console.error("Error:", err);
@@ -597,7 +538,7 @@ router.get("/noticeboard", requiresAuth(), asyncMiddleware(async (req, response,
       ...ejsUtilities,
       title: "Noticeboard",
       userProfile,
-      user: req.user,
+
       errors: {},
       data: { 'results': [], 'successful': 'NA' }
     }, (ren_err, html) => response.send(html));
@@ -620,7 +561,7 @@ router.get("/noticeboard", requiresAuth(), asyncMiddleware(async (req, response,
         ...ejsUtilities,
         title: "Noticeboard",
         userProfile,
-        user: req.user,
+
         successful: 1,
         errors: {},
         data: blender_response.data
