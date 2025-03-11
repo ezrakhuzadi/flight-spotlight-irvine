@@ -8,7 +8,7 @@ module.exports = function () {
         clientSecret: process.env.CLIENT_SECRET,
         issuerBaseURL: process.env.OIDC_DOMAIN,
         clientID: process.env.CLIENT_ID,
-        baseURL: process.env.BASE_URL,
+        baseURL: process.env.SPOTLIGHT_BASE_URL,
       
         authorizationParams: {
           response_type: 'code',
