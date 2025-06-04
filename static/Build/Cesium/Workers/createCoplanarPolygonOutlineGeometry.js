@@ -1,7 +1,7 @@
 /**
  * @license
  * Cesium - https://github.com/CesiumGS/cesium
- * Version 1.123
+ * Version 1.130
  *
  * Copyright 2011-2022 Cesium Contributors
  *
@@ -23,4 +23,199 @@
  * See https://github.com/CesiumGS/cesium/blob/main/LICENSE.md for full licensing details.
  */
 
-import{a as T}from"./chunk-ONYACCBZ.js";import"./chunk-7MCGOXW3.js";import{a as f}from"./chunk-IY45XUGY.js";import"./chunk-E3BAMNKM.js";import{a as G}from"./chunk-7GU2ORNB.js";import{a as C}from"./chunk-UBAKWGRR.js";import"./chunk-H3L4SJP4.js";import"./chunk-3EKULFHC.js";import"./chunk-BSHGEEYG.js";import"./chunk-CHGCLMPO.js";import"./chunk-M243PNMW.js";import{a as L}from"./chunk-BRFVOFKF.js";import"./chunk-XDFUUQMZ.js";import"./chunk-UKQRKTK2.js";import"./chunk-LNO7O274.js";import{a as w}from"./chunk-T53UE6JF.js";import{a as O}from"./chunk-RYO6NY7F.js";import{b,c as d,d as k}from"./chunk-2HSPJH3C.js";import{d as P}from"./chunk-T5AUOWE7.js";import"./chunk-Y5B6Y3WD.js";import{a as H}from"./chunk-6QVIJ7JA.js";import{a as l,d as g}from"./chunk-AODSXSC5.js";import"./chunk-IISQCXJ5.js";import"./chunk-MOE32UQS.js";import"./chunk-IIPSFM7Z.js";import{a as c}from"./chunk-WHQYJFDH.js";import{b as a}from"./chunk-OYWUGDKS.js";import{e as u}from"./chunk-DRYFJEFT.js";function E(o){let e=o.length,t=new Float64Array(e*3),r=w.createTypedArray(e,e*2),i=0,s=0;for(let n=0;n<e;n++){let p=o[n];t[i++]=p.x,t[i++]=p.y,t[i++]=p.z,r[s++]=n,r[s++]=(n+1)%e}let y=new O({position:new k({componentDatatype:H.DOUBLE,componentsPerAttribute:3,values:t})});return new d({attributes:y,indices:r,primitiveType:b.LINES})}function m(o){o=c(o,c.EMPTY_OBJECT);let e=o.polygonHierarchy;a.defined("options.polygonHierarchy",e),this._polygonHierarchy=e,this._workerName="createCoplanarPolygonOutlineGeometry",this.packedLength=f.computeHierarchyPackedLength(e,l)+1}m.fromPositions=function(o){o=c(o,c.EMPTY_OBJECT),a.defined("options.positions",o.positions);let e={polygonHierarchy:{positions:o.positions}};return new m(e)};m.pack=function(o,e,t){return a.typeOf.object("value",o),a.defined("array",e),t=c(t,0),t=f.packPolygonHierarchy(o._polygonHierarchy,e,t,l),e[t]=o.packedLength,e};var v={polygonHierarchy:{}};m.unpack=function(o,e,t){a.defined("array",o),e=c(e,0);let r=f.unpackPolygonHierarchy(o,e,l);e=r.startingIndex,delete r.startingIndex;let i=o[e];return u(t)||(t=new m(v)),t._polygonHierarchy=r,t.packedLength=i,t};m.createGeometry=function(o){let e=o._polygonHierarchy,t=e.positions;if(t=L(t,l.equalsEpsilon,!0),t.length<3||!T.validOutline(t))return;let i=f.polygonOutlinesFromHierarchy(e,!1);if(i.length===0)return;let s=[];for(let p=0;p<i.length;p++){let _=new G({geometry:E(i[p])});s.push(_)}let y=C.combineInstances(s)[0],n=P.fromPoints(e.positions);return new d({attributes:y.attributes,indices:y.indices,primitiveType:y.primitiveType,boundingSphere:n})};var h=m;function A(o,e){return u(e)&&(o=h.unpack(o,e)),o._ellipsoid=g.clone(o._ellipsoid),h.createGeometry(o)}var Z=A;export{Z as default};
+import {
+  CoplanarPolygonGeometryLibrary_default
+} from "./chunk-SIOVJ4L5.js";
+import "./chunk-YV37YFUM.js";
+import {
+  PolygonGeometryLibrary_default
+} from "./chunk-GAUF4F5A.js";
+import "./chunk-CES6DHHV.js";
+import {
+  GeometryInstance_default
+} from "./chunk-MFGVMUN3.js";
+import {
+  GeometryPipeline_default
+} from "./chunk-GM55YFOB.js";
+import "./chunk-JF4IYQYC.js";
+import "./chunk-EHB2OCQX.js";
+import "./chunk-2CAYUY2B.js";
+import "./chunk-QN7JEOQV.js";
+import "./chunk-RWFYLWSF.js";
+import {
+  arrayRemoveDuplicates_default
+} from "./chunk-KNA65INJ.js";
+import "./chunk-5WVF4BK7.js";
+import "./chunk-LWJWWCZ4.js";
+import "./chunk-GS55WTRX.js";
+import {
+  IndexDatatype_default
+} from "./chunk-QUSP3NWA.js";
+import {
+  GeometryAttributes_default
+} from "./chunk-F4ZAKN4V.js";
+import {
+  GeometryAttribute_default,
+  Geometry_default,
+  PrimitiveType_default
+} from "./chunk-NWSAYFZG.js";
+import {
+  BoundingSphere_default
+} from "./chunk-J4MAVE6J.js";
+import "./chunk-W6CPO62M.js";
+import {
+  ComponentDatatype_default
+} from "./chunk-UK33ZN4K.js";
+import {
+  Cartesian3_default,
+  Ellipsoid_default,
+  Frozen_default
+} from "./chunk-VGJSKEIB.js";
+import "./chunk-NR7KSD56.js";
+import "./chunk-5OL6XFNS.js";
+import "./chunk-HS76VTVY.js";
+import {
+  Check_default
+} from "./chunk-WYCR5DWQ.js";
+import {
+  defined_default
+} from "./chunk-FPYBD2P5.js";
+
+// packages/engine/Source/Core/CoplanarPolygonOutlineGeometry.js
+function createGeometryFromPositions(positions) {
+  const length = positions.length;
+  const flatPositions = new Float64Array(length * 3);
+  const indices = IndexDatatype_default.createTypedArray(length, length * 2);
+  let positionIndex = 0;
+  let index = 0;
+  for (let i = 0; i < length; i++) {
+    const position = positions[i];
+    flatPositions[positionIndex++] = position.x;
+    flatPositions[positionIndex++] = position.y;
+    flatPositions[positionIndex++] = position.z;
+    indices[index++] = i;
+    indices[index++] = (i + 1) % length;
+  }
+  const attributes = new GeometryAttributes_default({
+    position: new GeometryAttribute_default({
+      componentDatatype: ComponentDatatype_default.DOUBLE,
+      componentsPerAttribute: 3,
+      values: flatPositions
+    })
+  });
+  return new Geometry_default({
+    attributes,
+    indices,
+    primitiveType: PrimitiveType_default.LINES
+  });
+}
+function CoplanarPolygonOutlineGeometry(options) {
+  options = options ?? Frozen_default.EMPTY_OBJECT;
+  const polygonHierarchy = options.polygonHierarchy;
+  Check_default.defined("options.polygonHierarchy", polygonHierarchy);
+  this._polygonHierarchy = polygonHierarchy;
+  this._workerName = "createCoplanarPolygonOutlineGeometry";
+  this.packedLength = PolygonGeometryLibrary_default.computeHierarchyPackedLength(
+    polygonHierarchy,
+    Cartesian3_default
+  ) + 1;
+}
+CoplanarPolygonOutlineGeometry.fromPositions = function(options) {
+  options = options ?? Frozen_default.EMPTY_OBJECT;
+  Check_default.defined("options.positions", options.positions);
+  const newOptions = {
+    polygonHierarchy: {
+      positions: options.positions
+    }
+  };
+  return new CoplanarPolygonOutlineGeometry(newOptions);
+};
+CoplanarPolygonOutlineGeometry.pack = function(value, array, startingIndex) {
+  Check_default.typeOf.object("value", value);
+  Check_default.defined("array", array);
+  startingIndex = startingIndex ?? 0;
+  startingIndex = PolygonGeometryLibrary_default.packPolygonHierarchy(
+    value._polygonHierarchy,
+    array,
+    startingIndex,
+    Cartesian3_default
+  );
+  array[startingIndex] = value.packedLength;
+  return array;
+};
+var scratchOptions = {
+  polygonHierarchy: {}
+};
+CoplanarPolygonOutlineGeometry.unpack = function(array, startingIndex, result) {
+  Check_default.defined("array", array);
+  startingIndex = startingIndex ?? 0;
+  const polygonHierarchy = PolygonGeometryLibrary_default.unpackPolygonHierarchy(
+    array,
+    startingIndex,
+    Cartesian3_default
+  );
+  startingIndex = polygonHierarchy.startingIndex;
+  delete polygonHierarchy.startingIndex;
+  const packedLength = array[startingIndex];
+  if (!defined_default(result)) {
+    result = new CoplanarPolygonOutlineGeometry(scratchOptions);
+  }
+  result._polygonHierarchy = polygonHierarchy;
+  result.packedLength = packedLength;
+  return result;
+};
+CoplanarPolygonOutlineGeometry.createGeometry = function(polygonGeometry) {
+  const polygonHierarchy = polygonGeometry._polygonHierarchy;
+  let outerPositions = polygonHierarchy.positions;
+  outerPositions = arrayRemoveDuplicates_default(
+    outerPositions,
+    Cartesian3_default.equalsEpsilon,
+    true
+  );
+  if (outerPositions.length < 3) {
+    return;
+  }
+  const isValid = CoplanarPolygonGeometryLibrary_default.validOutline(outerPositions);
+  if (!isValid) {
+    return void 0;
+  }
+  const polygons = PolygonGeometryLibrary_default.polygonOutlinesFromHierarchy(
+    polygonHierarchy,
+    false
+  );
+  if (polygons.length === 0) {
+    return void 0;
+  }
+  const geometries = [];
+  for (let i = 0; i < polygons.length; i++) {
+    const geometryInstance = new GeometryInstance_default({
+      geometry: createGeometryFromPositions(polygons[i])
+    });
+    geometries.push(geometryInstance);
+  }
+  const geometry = GeometryPipeline_default.combineInstances(geometries)[0];
+  const boundingSphere = BoundingSphere_default.fromPoints(polygonHierarchy.positions);
+  return new Geometry_default({
+    attributes: geometry.attributes,
+    indices: geometry.indices,
+    primitiveType: geometry.primitiveType,
+    boundingSphere
+  });
+};
+var CoplanarPolygonOutlineGeometry_default = CoplanarPolygonOutlineGeometry;
+
+// packages/engine/Source/Workers/createCoplanarPolygonOutlineGeometry.js
+function createCoplanarPolygonOutlineGeometry(polygonGeometry, offset) {
+  if (defined_default(offset)) {
+    polygonGeometry = CoplanarPolygonOutlineGeometry_default.unpack(
+      polygonGeometry,
+      offset
+    );
+  }
+  polygonGeometry._ellipsoid = Ellipsoid_default.clone(polygonGeometry._ellipsoid);
+  return CoplanarPolygonOutlineGeometry_default.createGeometry(polygonGeometry);
+}
+var createCoplanarPolygonOutlineGeometry_default = createCoplanarPolygonOutlineGeometry;
+export {
+  createCoplanarPolygonOutlineGeometry_default as default
+};

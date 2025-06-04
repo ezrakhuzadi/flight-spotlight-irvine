@@ -85,13 +85,14 @@ const pollBlenderProcess = async (job) => {
     const flights_url = `${base_url}/flight_stream/get_air_traffic/${session_id}?view=${viewport_str}`;
     console.debug(`Flights url: ${flights_url}`);
 
-    const fullproc = 15;
+    const fullproc = 30;
     for (let h = 0; h < fullproc; h++) {
         try {
             const blender_response = await axios_instance.get(flights_url);
             const observations = blender_response.data['observations'];
             const obs_len = observations.length;
-            console.log(`Processing ${obs_len} observations`);
+            const timestamp = new Date().toISOString();
+            console.log(`[${timestamp}] Processing ${obs_len} observations..`);
             if (obs_len > 0) {
                 setObservationsLocally(observations);
             }
@@ -99,8 +100,8 @@ const pollBlenderProcess = async (job) => {
             console.log("Error in retrieving data from Blender");
             console.log(blender_error);
         }
-        await delay(3000);
-        console.log('Waiting 3 seconds ..');
+        await delay(2000);
+        console.debug('Waiting 2 seconds ..');
     }
 
     console.log('Computation Complete..');
