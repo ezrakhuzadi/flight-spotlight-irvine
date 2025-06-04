@@ -118,11 +118,19 @@ router.get("/noticeboard/map", requiresAuth(), asyncMiddleware(async (req, respo
         data: blender_response.data
       }, (ren_err, html) => response.send(html));
     } else {
-      response.sendStatus(500);
+      response.status(error.status || 500);
+      response.render('error', {
+        message: error.message,
+        error: process.env.NODE_ENV === 'development' ? error : {}
+      });
     }
   } catch (error) {
     console.error(error);
-    response.sendStatus(500);
+    response.status(error.status || 500);
+    response.render('error', {
+      message: error.message,
+      error: process.env.NODE_ENV === 'development' ? error : {}
+    });
   }
 }));
 
@@ -191,12 +199,20 @@ router.get("/noticeboard/globe", requiresAuth(), asyncMiddleware(async (req, res
           data: blender_response.data
         }, (ren_err, html) => response.send(html));
       } else {
-        response.sendStatus(500);
+        response.status(error.status || 500);
+        response.render('error', {
+          message: error.message,
+          error: process.env.NODE_ENV === 'development' ? error : {}
+        });
       }
     })
     .catch(error => {
       console.error(error);
-      response.sendStatus(500);
+      response.status(error.status || 500);
+      response.render('error', {
+        message: error.message,
+        error: process.env.NODE_ENV === 'development' ? error : {}
+      });
     });
 
   function isValidDate(d) {
@@ -364,25 +380,22 @@ router.get('/blender_status', requiresAuth(), function (req, response, next) {
     });
   });
 });
-
-router.get("/get_metadata/:icao_address?", checkJwt, jwtAuthz(['spotlight.read']), (req, response, next) => {
-
-  var icao_address = req.params.icao_address;
-  if (!icao_address) {
-    next();
-    return;
+router.get("/get_metadata/:observationKey?", checkJwt, jwtAuthz(['spotlight.read']), async (req, res, next) => {
+  const observationKey = req.params.observationKey;
+  if (!observationKey) {
+    return next();
   }
 
-  async function get_meta_data(callback) {
-    const all_metadata = await redis_client.get(metadata_key);
-    return all_metadata
-  };
-  get_meta_data(function (metadata) {
-    response.send({
-      'metadata': JSON.parse(all_metadata)
+  const metadata_key = `${observationKey}-metadata`;
+  try {
+    const metadata = await redis_client.get(metadata_key);
+    res.send({
+      metadata: metadata ? JSON.parse(metadata) : null
     });
-  });
-
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
 });
 
 router.post("/set_geo_fence", checkJwt, jwtAuthz(['spotlight.write']), check('geo_fence').custom(submitted_geo_fence => {
@@ -577,11 +590,19 @@ router.get("/noticeboard", requiresAuth(), asyncMiddleware(async (req, response,
         data: blender_response.data
       }, (ren_err, html) => response.send(html));
     } else {
-      response.sendStatus(500);
+      response.status(error.status || 500);
+      response.render('error', {
+        message: error.message,
+        error: process.env.NODE_ENV === 'development' ? error : {}
+      });
     }
   } catch (error) {
 
-    response.sendStatus(500);
+    response.status(error.status || 500);
+    response.render('error', {
+      message: error.message,
+      error: process.env.NODE_ENV === 'development' ? error : {}
+    });
   }
 }));
 

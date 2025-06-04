@@ -20,14 +20,14 @@ function setObservationsLocally(observations) {
 
         metadata.source_type = source_type;
         metadata.traffic_source = traffic_source;
-
+        const observationKey = uuidv4();
         try {
-            tile38_client.set('observation', icao_address, [lat_dd, lon_dd, altitude_mm], metadata, { expire: 60 });
+            tile38_client.set('observation', icao_address, [lat_dd, lon_dd, altitude_mm], observationKey, { expire: 60 });
         } catch (err) {
             console.log("Error " + err);
         }
 
-        const metadata_key = `${icao_address}-metadata`;
+        const metadata_key = `${observationKey}-metadata`;
         (async () => {
             try {
                 await redis_client.set(metadata_key, JSON.stringify(metadata));
