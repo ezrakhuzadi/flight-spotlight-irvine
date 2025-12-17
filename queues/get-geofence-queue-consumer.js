@@ -20,7 +20,7 @@ function setGeoFenceLocally(geo_fence_detail) {
 
     for (const geo_fence of geo_fence_list) {
 
-        const geo_fence_id = geo_fence['id']
+        const geo_fence_id = geo_fence['id'];
 
 
         let upper_limit = geo_fence['upper_limit'];

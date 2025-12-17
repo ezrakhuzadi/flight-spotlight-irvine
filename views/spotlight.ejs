@@ -320,7 +320,30 @@
                         );
 
                     }
-                } else if (spotlight_data.alert_type == 'observation_crosses_geofence') {
+                }
+                else if (spotlight_data.alert_type == 'operational_intents_in_aoi') {
+                    const result_geo_json = spotlight_data.results.objects;
+
+                    for (let index = 0; index < result_geo_json.length; index++) {
+                        const geo_json_element = result_geo_json[index]['object'];
+                        const flight_declaration_heights = result_geo_json[index]['fields'];
+                        var dataSource = Cesium.GeoJsonDataSource.load(geo_json_element).then(
+                            function (dataSource) {
+                                var p = dataSource.entities.values;
+                                for (var i = 0; i < p.length; i++) {
+                                    p[i].polygon.height = flight_declaration_heights[1]; // or height property
+                                    p[i].polygon.extrudedHeight = flight_declaration_heights[
+                                        0]; // or height property
+                                    p[i].polygon.outlineColor = Cesium.Color.WHITE.withAlpha(0.2),
+                                        p[i].polygon.material = Cesium.Color.YELLOW.withAlpha(0.2)
+                                }
+                                viewer.dataSources.add(dataSource);
+                            }
+                        );
+
+                    }
+                }  
+                else if (spotlight_data.alert_type == 'observation_crosses_geofence') {
                     let d = new Date();
                     console.log(spotlight_data);
                     addToList('<span class="date">' + d.toLocaleTimeString() + '</span> ' + spotlight_data.results);

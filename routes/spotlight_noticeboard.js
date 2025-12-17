@@ -25,7 +25,7 @@ let passport_helper = require('./passport_helper');
 const { sendStdMsg } = require('../util/io');
 
 const { requiresAuth } = require('express-openid-connect');
-const { createNewPollBlenderProcess, createNewADSBFeedProcess, createNewBlenderDSSSubscriptionProcess, createNewGeofenceProcess } = require("../queues/live-blender-queue");
+const { createNewPollBlenderProcess, createNewADSBFeedProcess, createNewBlenderDSSSubscriptionProcess, createNewGeofenceProcess,getNewNearbyOperationalIntentsProcess } = require("../queues/live-blender-queue");
 
 
 const {
@@ -282,6 +282,12 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
     "userEmail": email,
     "job_id": uuidv4(),
     "job_type": 'get_geo_fence'
+  });
+  getNewNearbyOperationalIntentsProcess({
+    "viewport": lat_lng_formatted_array,
+    "userEmail": email,
+    "job_id": uuidv4(),
+    "job_type": 'get_nearby_operational_intents'
   });
 
 
