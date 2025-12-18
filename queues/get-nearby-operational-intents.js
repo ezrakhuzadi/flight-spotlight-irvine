@@ -43,12 +43,11 @@ function setFlightDeclarationsLocally(query_uuid, operational_intent_detail) {
       random_operational_intent_id,
       operational_intent_feature["geometry"],
       {
-        upper_limit: upper_limit,
-        lower_limit: lower_limit,
-        operational_intent_id: operational_intent_id,
-        operational_intent_manager: operational_intent_manager,
-        operational_intent_state: operational_intent_state,
-        query_uuid: query_uuid,
+        "upper_limit": upper_limit,
+        "lower_limit": lower_limit,
+        "operational_intent_id": operational_intent_id,
+        "operational_intent_manager": operational_intent_manager,
+        "operational_intent_state": operational_intent_state,
       },
       {
         expire: 20,
