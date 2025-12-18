@@ -340,7 +340,7 @@
 
                     for (let index = 0; index < result_geo_json.length; index++) {
                         const geo_json_element = result_geo_json[index]['object'];
-                        console.log(result_geo_json[index])
+                        
                         const flight_declaration_fields = result_geo_json[index]['fields'];
                         const heights = flight_declaration_fields.filter(item => typeof item === 'number');
                         const minHeight = Math.min(...heights);
@@ -366,7 +366,6 @@
                 }  
                 else if (spotlight_data.alert_type == 'observation_crosses_geofence') {
                     let d = new Date();
-                    console.log(spotlight_data);
                     addToList('<span class="date">' + d.toLocaleTimeString() + '</span> ' + spotlight_data.results);
 
                 }
