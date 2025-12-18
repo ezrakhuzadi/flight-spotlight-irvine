@@ -152,6 +152,16 @@
         });
 
         viewer.imageryLayers.add(mapbox);
+
+          // Subscribe to changes in selectedEntity
+          viewer.selectedEntityChanged.addEventListener(function(entity) {
+              if (entity) {
+                  // Display custom UI or pop-up with entity properties
+                  if (entity.description) {
+                    console.log(entity.description);
+                  }
+              }
+          });
         var scene = viewer.scene;
         var clock = viewer.clock;
         var camera = viewer.camera;
@@ -342,6 +352,7 @@
                               p[i].description = `ID: ${id}<br>Manager: ${manager}<br>State: ${state}`;
                             }
                             viewer.dataSources.add(dataSource);
+
                           }
                         );
 
