@@ -4,6 +4,7 @@ const redis_client = require('../routes/redis-client');
 const tile38_host = process.env.TILE38_SERVER || '0.0.0.0';
 const tile38_port = process.env.TILE38_PORT || 9851;
 const { sendStdMsg } = require('../util/io');
+const { detectConflicts } = require('../util/conflict_helper');
 const { v4: uuidv4 } = require('uuid');
 var Tile38 = require('tile38');
 const axios = require('axios');
@@ -11,6 +12,9 @@ require("dotenv").config();
 const qs = require('qs');
 var tile38_client = new Tile38({ host: tile38_host, port: tile38_port });
 let passport_helper = require('../routes/passport_helper');
+
+// Track recent observations for conflict detection
+let recentObservations = new Map();
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
@@ -71,6 +75,27 @@ const pollBlenderProcess = async (job) => {
             console.error("[Geofence] ERROR: " + err);
         } else {
             console.log(`[Geofence] EVENT RECEIVED: ${JSON.stringify(results)}`);
+
+            // Track observation for conflict detection
+            if (results.id && results.object) {
+                recentObservations.set(results.id, results);
+
+                // Check for conflicts if we have 2+ drones
+                if (recentObservations.size >= 2) {
+                    const obsArray = Array.from(recentObservations.values());
+                    const conflicts = detectConflicts(obsArray);
+
+                    // Send conflict alerts
+                    for (const conflict of conflicts) {
+                        sendStdMsg(room, {
+                            'type': 'message',
+                            'alert_type': 'conflict_alert',
+                            'conflict': conflict
+                        });
+                    }
+                }
+            }
+
             sendStdMsg(room, {
                 'type': 'message',
                 "alert_type": "observation_in_aoi",
