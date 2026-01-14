@@ -22,7 +22,7 @@ function setObservationsLocally(observations) {
         metadata.traffic_source = traffic_source;
         const observationKey = uuidv4();
         try {
-            tile38_client.set('observation', icao_address, [lat_dd, lon_dd, altitude_mm], observationKey, { expire: 60 });
+            tile38_client.set('observation', icao_address, [lon_dd, lat_dd, altitude_mm], observationKey, { expire: 60 });
         } catch (err) {
             console.log("Error " + err);
         }
