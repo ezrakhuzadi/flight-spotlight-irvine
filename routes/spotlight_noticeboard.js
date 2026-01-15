@@ -255,7 +255,8 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
   lat = parseFloat(lat);
   lng = parseFloat(lng);
 
-  const aoi_buffer = turf.buffer(turf.point([lng, lat]), 4.5, { units: 'kilometers' });
+  // Large AOI (500km) to stream ALL flights by default - effectively global mode
+  const aoi_buffer = turf.buffer(turf.point([lng, lat]), 500, { units: 'kilometers' });
 
   const email = userProfile.email;
   const aoi_bbox = turf.bbox(aoi_buffer);
