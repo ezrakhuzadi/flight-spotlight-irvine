@@ -24,8 +24,8 @@ let passport_helper = require('./passport_helper');
 
 const { sendStdMsg } = require('../util/io');
 
-const { requiresAuth } = require('express-openid-connect');
-const { createNewPollBlenderProcess, createNewADSBFeedProcess, createNewBlenderDSSSubscriptionProcess, createNewGeofenceProcess } = require("../queues/live-blender-queue");
+const { requiresAuth } = require('../util/requiresAuth');
+const { createNewPollBlenderProcess, createNewADSBFeedProcess, createNewBlenderDSSSubscriptionProcess, createNewGeofenceProcess, getNewNearbyOperationalIntentsProcess } = require("../queues/live-blender-queue");
 
 
 const {
@@ -255,7 +255,7 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
   lat = parseFloat(lat);
   lng = parseFloat(lng);
 
-  const aoi_buffer = turf.buffer(turf.point([lng, lat]), 2.5, { units: 'kilometers' });
+  const aoi_buffer = turf.buffer(turf.point([lng, lat]), 4.5, { units: 'kilometers' });
 
   const email = userProfile.email;
   const aoi_bbox = turf.bbox(aoi_buffer);
@@ -282,6 +282,12 @@ router.get("/spotlight", requiresAuth(), asyncMiddleware(async (req, response, n
     "userEmail": email,
     "job_id": uuidv4(),
     "job_type": 'get_geo_fence'
+  });
+  getNewNearbyOperationalIntentsProcess({
+    "viewport": lat_lng_formatted_array,
+    "userEmail": email,
+    "job_id": uuidv4(),
+    "job_type": 'get_nearby_operational_intents'
   });
 
 

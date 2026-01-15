@@ -5,6 +5,7 @@ const { createBlenderDSSSubscriptionProcess } = require("./create-dss-subscripti
 
 const { getGeoFenceConsumerProcess } = require("./get-geofence-queue-consumer");
 
+const { getNearbyOperationalIntentsProcess } = require("./get-nearby-operational-intents");
 // Our job queues
 const pollBlenderQueue = new Queue("pollblender", {
   redis: process.env.REDIS_URL,
@@ -20,6 +21,11 @@ const dssSubscriptionQueue = new Queue("dsssubscriptiongenerator", {
 const getGeoFenceQueue = new Queue("getgeofencequeue", {
   redis: process.env.REDIS_URL,
 });
+
+const getNearbyOperationalIntentsQueue = new Queue("nearbyoperationalintents", {
+  redis: process.env.REDIS_URL,
+});
+
 getGeoFenceQueue.process(getGeoFenceConsumerProcess);
 
 const createNewGeofenceProcess = (geofenceRequestDetails) => {
@@ -46,6 +52,14 @@ const createNewADSBFeedProcess = (adsbRequestDetails) => {
   });
 };
 
+getNearbyOperationalIntentsQueue.process(getNearbyOperationalIntentsProcess);
+
+const getNewNearbyOperationalIntentsProcess  = (nearbyOperationalIntentsDetails) => {
+  getNearbyOperationalIntentsQueue.add(nearbyOperationalIntentsDetails, {
+    attempts: 2,
+  });
+};
+
 pollBlenderQueue.process(pollBlenderProcess);
 
 const createNewPollBlenderProcess = (pollBlenderDetails) => {
@@ -65,6 +79,9 @@ module.exports = {
   createNewBlenderDSSSubscriptionProcess,
 
   getGeoFenceQueue,
-  createNewGeofenceProcess
+  createNewGeofenceProcess,
+
+  getNearbyOperationalIntentsQueue,
+  getNewNearbyOperationalIntentsProcess
 
 };
