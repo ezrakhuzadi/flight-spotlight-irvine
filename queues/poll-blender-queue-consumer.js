@@ -101,16 +101,17 @@ const pollBlenderProcess = async (job) => {
         });
     });
 
-    setTimeout(() => {
-        flight_aoi_fence.close();
-    }, 60000);
+    // Removed 60s timeout - stream indefinitely
+    // setTimeout(() => {
+    //     flight_aoi_fence.close();
+    // }, 60000);
 
 
     const flights_url = `${base_url}/flight_stream/get_air_traffic/${session_id}?view=${viewport_str}`;
     console.debug(`Flights url: ${flights_url}`);
 
-    const fullproc = 300; // 300 iterations * 2s = 10 minutes of live updates
-    for (let h = 0; h < fullproc; h++) {
+    // Run indefinitely - stream flights forever
+    while (true) {
         try {
             const blender_response = await axios_instance.get(flights_url);
             const observations = blender_response.data['observations'];
