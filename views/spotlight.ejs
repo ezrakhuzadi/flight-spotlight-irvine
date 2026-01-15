@@ -199,28 +199,42 @@
       // Update Cockpit View every tick
       viewer.clock.onTick.addEventListener(function (clock) {
         if (cameraMode === 'cockpit' && trackedDroneId && droneEntities.has(trackedDroneId)) {
-          const entity = droneEntities.get(trackedDroneId);
-          if (entity && entity.position) {
+          try {
+            const entity = droneEntities.get(trackedDroneId);
+            if (!entity || !entity.position) return;
+            
             const position = entity.position.getValue(clock.currentTime);
-            const orientation = entity.orientation.getValue(clock.currentTime); // Quaternion
-
-            if (position && orientation) {
-              // Get Heading/Pitch/Roll from Quaternion
-              const hpr = Cesium.HeadingPitchRoll.fromQuaternion(orientation);
-
-              // Set camera to drone position
-              viewer.camera.setView({
-                destination: position,
-                orientation: {
-                  heading: hpr.heading,
-                  pitch: hpr.pitch, // Look slightly down? ,
-                  roll: hpr.roll
-                }
-              });
-
-              // Move slightly forward/up? 
-              // For now, exactly at center is fine for FPV
+            if (!position) return;
+            
+            // Check if orientation exists (some entities may not have it)
+            let heading = 0, pitch = 0, roll = 0;
+            if (entity.orientation) {
+              const orientation = entity.orientation.getValue(clock.currentTime);
+              if (orientation) {
+                const hpr = Cesium.HeadingPitchRoll.fromQuaternion(orientation);
+                heading = hpr.heading;
+                pitch = hpr.pitch;
+                roll = hpr.roll;
+              }
+            } else {
+              // Fallback: Use droneData heading if available
+              const data = droneData.get(trackedDroneId);
+              if (data && data.heading) {
+                heading = Cesium.Math.toRadians(data.heading);
+              }
+              pitch = Cesium.Math.toRadians(-15); // Slight downward tilt for FPV
             }
+
+            viewer.camera.setView({
+              destination: position,
+              orientation: {
+                heading: heading,
+                pitch: pitch,
+                roll: roll
+              }
+            });
+          } catch (e) {
+            console.warn('Cockpit camera error:', e);
           }
         }
       });
