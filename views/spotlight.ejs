@@ -541,11 +541,12 @@
       }
       function get_globe_center() {
         var windowPosition = new Cesium.Cartesian2(viewer.container.clientWidth / 2, viewer.container.clientHeight / 2);
-        var pickPosition = viewer.camera.pickEllipsoid(windowPosition);
+        var pickPosition = viewer.camera.pickEllipsoid(windowPosition, Cesium.Ellipsoid.WGS84);
         if (!pickPosition) {
           return { "lat": 0, "lng": 0 };
         }
-        var pickPositionCartographic = viewer.scene.globe.ellipsoid.cartesianToCartographic(pickPosition);
+        // Use Cesium.Ellipsoid.WGS84 directly (globe may be disabled for 3D tiles)
+        var pickPositionCartographic = Cesium.Ellipsoid.WGS84.cartesianToCartographic(pickPosition);
         const lng = pickPositionCartographic.longitude * (180 / Math.PI);
         const lat = pickPositionCartographic.latitude * (180 / Math.PI);
 
