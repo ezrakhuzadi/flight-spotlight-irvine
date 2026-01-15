@@ -36,4 +36,4 @@ services:
     volumes:
       - ./views:/usr/src/app/views # Mount local views for live editing
     ports:
-      - "5000:5000"
+      - "5050:5050"

@@ -56,7 +56,8 @@ const pollBlenderProcess = async (job) => {
             'Authorization': cred
         }
     });
-    let session_id = uuidv4();
+    // Use the same session ID as atc-server to ensure data is retrieved from the correct "mailbox"
+    let session_id = process.env.BLENDER_SESSION_ID || '00000000-0000-0000-0000-000000000001';
 
 
     const aoi_query = tile38_client.intersectsQuery('observation').bounds(viewport[0], viewport[1], viewport[2], viewport[3]).detect('inside');
