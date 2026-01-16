@@ -1,0 +1,337 @@
+<%- include('layouts/main', { title: 'Analytics' , activePage: 'analytics' , head: ` <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    `,
+    body: ` <div class="content-area">
+        <!-- Page Header -->
+        <div class="section-header">
+            <div>
+                <h1 class="page-title">Analytics</h1>
+                <p class="page-subtitle">Flight performance and operational insights</p>
+            </div>
+            <div class="flex gap-sm">
+                <select class="form-select" id="dateRange" style="width: auto;">
+                    <option value="today">Today</option>
+                    <option value="week" selected>Last 7 Days</option>
+                    <option value="month">Last 30 Days</option>
+                </select>
+                <button class="btn btn-ghost" onclick="exportReport()">Export Report</button>
+            </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="stats-grid mb-lg" style="grid-template-columns: repeat(5, 1fr);">
+            <div class="stat-card">
+                <div class="stat-value" id="totalFlights">247</div>
+                <div class="stat-label">Total Flights</div>
+            </div>
+            <div class="stat-card highlight-green">
+                <div class="stat-value" id="successRate">98.4%</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card highlight-blue">
+                <div class="stat-value" id="totalDistance">1,234 km</div>
+                <div class="stat-label">Distance Flown</div>
+            </div>
+            <div class="stat-card highlight-yellow">
+                <div class="stat-value" id="totalFlightTime">48.5 hrs</div>
+                <div class="stat-label">Flight Time</div>
+            </div>
+            <div class="stat-card highlight-red">
+                <div class="stat-value" id="conflictsResolved">12</div>
+                <div class="stat-label">Conflicts Resolved</div>
+            </div>
+        </div>
+
+        <div class="grid-2-col mb-lg">
+            <!-- Flight Activity Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Flight Activity</div>
+                </div>
+                <div class="card-body" style="height: 300px;">
+                    <canvas id="flightActivityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Conflict Analysis -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Conflict Resolution</div>
+                </div>
+                <div class="card-body" style="height: 300px;">
+                    <canvas id="conflictChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2-col mb-lg">
+            <!-- Flight Duration Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Flight Duration Distribution</div>
+                </div>
+                <div class="card-body" style="height: 280px;">
+                    <canvas id="durationChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Hourly Activity -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Hourly Flight Activity</div>
+                </div>
+                <div class="card-body" style="height: 280px;">
+                    <canvas id="hourlyChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2-col">
+            <!-- Fleet Performance -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Fleet Performance</div>
+                </div>
+                <div class="card-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Drone</th>
+                                <th>Flights</th>
+                                <th>Distance</th>
+                                <th>Uptime</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fleetTable">
+                            <tr>
+                                <td>demo-alpha</td>
+                                <td>45</td>
+                                <td>234 km</td>
+                                <td>99.2%</td>
+                                <td><span class="status-badge online">Healthy</span></td>
+                            </tr>
+                            <tr>
+                                <td>demo-beta</td>
+                                <td>42</td>
+                                <td>198 km</td>
+                                <td>97.8%</td>
+                                <td><span class="status-badge online">Healthy</span></td>
+                            </tr>
+                            <tr>
+                                <td>drone-003</td>
+                                <td>38</td>
+                                <td>156 km</td>
+                                <td>95.4%</td>
+                                <td><span class="status-badge flying">Maintenance Due</span></td>
+                            </tr>
+                            <tr>
+                                <td>drone-004</td>
+                                <td>32</td>
+                                <td>124 km</td>
+                                <td>98.1%</td>
+                                <td><span class="status-badge online">Healthy</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent Events Log -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Event Log</div>
+                </div>
+                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Mission completed: demo-alpha</div>
+                            <div class="list-item-subtitle">Survey Route A - 5.2km in 12min</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">2m ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Conflict resolved</div>
+                            <div class="list-item-subtitle">demo-alpha - demo-beta (Vertical separation)</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">15m ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Geofence advisory</div>
+                            <div class="list-item-subtitle">drone-003 near Construction Zone A</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">1h ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Drone registered</div>
+                            <div class="list-item-subtitle">drone-004 connected to ATC</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">2h ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Mission started</div>
+                            <div class="list-item-subtitle">demo-beta: Delivery Route B</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">3h ago</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    `,
+    scripts: `
+    <script>
+        // Chart.js defaults for dark theme
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.borderColor = '#334155';
+
+        document.addEventListener('DOMContentLoaded', function () {
+            initCharts();
+        });
+
+        function initCharts() {
+            // Flight Activity Bar Chart
+            new Chart(document.getElementById('flightActivityChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                    datasets: [
+                        {
+                            label: 'Completed',
+                            data: [32, 45, 38, 42, 35, 28, 27],
+                            backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                            borderRadius: 4
+                        },
+                        {
+                            label: 'In Progress',
+                            data: [5, 8, 6, 7, 4, 3, 2],
+                            backgroundColor: 'rgba(251, 191, 36, 0.8)',
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { boxWidth: 12, padding: 15 }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#1e293b' }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+
+            // Conflict Resolution Doughnut Chart
+            new Chart(document.getElementById('conflictChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Vertical Separation', 'Horizontal Reroute', 'Hold Command', 'Speed Adjustment'],
+                    datasets: [{
+                        data: [45, 28, 18, 9],
+                        backgroundColor: [
+                            'rgba(56, 189, 248, 0.8)',
+                            'rgba(16, 185, 129, 0.8)',
+                            'rgba(251, 191, 36, 0.8)',
+                            'rgba(167, 139, 250, 0.8)'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { boxWidth: 12, padding: 12 }
+                        }
+                    }
+                }
+            });
+
+            // Flight Duration Distribution
+            new Chart(document.getElementById('durationChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['0-5m', '5-10m', '10-15m', '15-20m', '20-30m', '30m+'],
+                    datasets: [{
+                        label: 'Flights',
+                        data: [18, 45, 62, 38, 24, 12],
+                        backgroundColor: 'rgba(56, 189, 248, 0.7)',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#1e293b' }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+
+            // Hourly Activity Line Chart
+            new Chart(document.getElementById('hourlyChart'), {
+                type: 'line',
+                data: {
+                    labels: ['6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'],
+                    datasets: [{
+                        label: 'Active Drones',
+                        data: [2, 8, 15, 12, 18, 14, 8, 3],
+                        borderColor: 'rgba(16, 185, 129, 1)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 4,
+                        pointBackgroundColor: 'rgba(16, 185, 129, 1)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#1e293b' }
+                        },
+                        x: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        function exportReport() {
+            alert('Report export functionality coming soon!');
+        }
+    </script>
+    `
+    }) %>

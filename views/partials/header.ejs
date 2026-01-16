@@ -1,0 +1,50 @@
+<header class="main-header">
+    <!-- Brand -->
+    <a href="/control" class="brand">
+        <span class="brand-text">Control Center</span>
+    </a>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+        <a href="/control" class="nav-tab <%= activePage === 'dashboard' ? 'active' : '' %>">
+            <span>Dashboard</span>
+        </a>
+        <a href="/control/map" class="nav-tab <%= activePage === 'map' ? 'active' : '' %>">
+            <span>Map</span>
+        </a>
+        <a href="/control/fleet" class="nav-tab <%= activePage === 'fleet' ? 'active' : '' %>">
+            <span>Fleet</span>
+        </a>
+        <a href="/control/missions" class="nav-tab <%= activePage === 'missions' ? 'active' : '' %>">
+            <span>Missions</span>
+        </a>
+        <a href="/control/geofences" class="nav-tab <%= activePage === 'geofences' ? 'active' : '' %>">
+            <span>Geofences</span>
+        </a>
+        <a href="/control/analytics" class="nav-tab <%= activePage === 'analytics' ? 'active' : '' %>">
+            <span>Analytics</span>
+        </a>
+    </nav>
+
+    <!-- Spacer -->
+    <div class="header-spacer"></div>
+
+    <!-- Header Actions -->
+    <div class="header-actions">
+        <a href="/control/settings" class="btn btn-ghost btn-sm <%= activePage === 'settings' ? 'active' : '' %>"
+            title="Settings">
+            Settings
+        </a>
+
+        <% if (typeof user !=='undefined' && user) { %>
+            <div class="user-menu">
+                <span class="user-name">
+                    <%= user.name %>
+                </span>
+                <a href="/logout" class="btn btn-ghost btn-sm" title="Logout">
+                    Logout
+                </a>
+            </div>
+            <% } %>
+    </div>
+</header>

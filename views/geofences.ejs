@@ -1,0 +1,154 @@
+<%- include('layouts/main', { title: 'Geofences' , activePage: 'geofences' , head: ` <!-- CesiumJS -->
+    <script src="/assets/Build/Cesium/Cesium.js"></script>
+    <style>
+        @import url(/assets/Build/Cesium/Widgets/widgets.css);
+
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+        }
+
+        .geofence-map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        .geofence-sidebar {
+            width: 380px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .geofence-sidebar-header {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-primary);
+        }
+
+        .geofence-sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-md);
+        }
+
+        .geofence-item {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-bottom: 4px;
+        }
+
+        .geofence-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .map-controls-overlay {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 10;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 4px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            padding: 6px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+    </style>
+    `,
+    body: `
+    <!-- Full-width map layout -->
+    <div class="content-area no-padding" style="display: flex;">
+        <!-- Sidebar -->
+        <aside class="geofence-sidebar">
+            <div class="geofence-sidebar-header">
+                <div class="flex items-center justify-between">
+                    <div class="card-title">Geofences</div>
+                    <a href="/control/geofences/create" class="btn btn-primary btn-sm">+ Create</a>
+                </div>
+                <p class="text-muted" style="font-size: 12px; margin-top: 4px;">Manage no-fly zones and restricted areas
+                </p>
+            </div>
+
+            <div class="geofence-sidebar-content">
+                <!-- Stats -->
+                <div class="stats-grid mb-md" style="grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                    <div class="stat-card" style="padding: 12px;">
+                        <div class="stat-value" style="font-size: 20px;">3</div>
+                        <div class="stat-label" style="font-size: 10px;">Total</div>
+                    </div>
+                    <div class="stat-card highlight-red" style="padding: 12px;">
+                        <div class="stat-value" style="font-size: 20px;">1</div>
+                        <div class="stat-label" style="font-size: 10px;">No-Fly</div>
+                    </div>
+                </div>
+
+                <!-- Filter -->
+                <div class="flex gap-sm mb-md">
+                    <button class="btn btn-ghost btn-sm active" data-filter="all"
+                        onclick="GeofenceControl.filter('all')">All</button>
+                    <button class="btn btn-ghost btn-sm" data-filter="no_fly"
+                        onclick="GeofenceControl.filter('no_fly')">No-Fly</button>
+                    <button class="btn btn-ghost btn-sm" data-filter="restricted"
+                        onclick="GeofenceControl.filter('restricted')">Restricted</button>
+                </div>
+
+                <!-- Geofence List -->
+                <div class="section-subtitle">Active Geofences</div>
+                <div id="geofenceList">
+                    <div class="geofence-item" data-type="no_fly" data-id="uci-campus"
+                        onclick="GeofenceControl.focus('uci-campus')">
+                        <span class="status-dot" style="background: var(--accent-red);"></span>
+                        <div class="list-item-content">
+                            <div class="list-item-title">UCI Campus Core</div>
+                            <div class="list-item-subtitle">No-Fly Zone | 0-120m</div>
+                        </div>
+                    </div>
+                    <div class="geofence-item" data-type="restricted" data-id="sna-airport"
+                        onclick="GeofenceControl.focus('sna-airport')">
+                        <span class="status-dot" style="background: var(--accent-yellow);"></span>
+                        <div class="list-item-content">
+                            <div class="list-item-title">John Wayne Airport</div>
+                            <div class="list-item-subtitle">Restricted | 0-400m</div>
+                        </div>
+                    </div>
+                    <div class="geofence-item" data-type="temporary" data-id="construction-a"
+                        onclick="GeofenceControl.focus('construction-a')">
+                        <span class="status-dot" style="background: var(--accent-cyan);"></span>
+                        <div class="list-item-content">
+                            <div class="list-item-title">Construction Zone A</div>
+                            <div class="list-item-subtitle">Temporary | 0-60m</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <div class="geofence-map-container">
+            <div id="cesiumContainer"></div>
+
+            <!-- Controls Overlay -->
+            <div class="map-controls-overlay">
+                <div class="control-group">
+                    <button class="btn btn-ghost btn-sm" onclick="GeofenceControl.reset()">Reset View</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/geofences.js"></script>
+    `
+    }) %>

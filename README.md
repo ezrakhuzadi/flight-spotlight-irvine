@@ -1,59 +1,85 @@
-<img src="images/spotlight-logo.png" width="350">
+# ATC-Drone Control Center
 
-# Flight Spotlight
+Web-based mission control interface for the ATC-Drone UTM (Unmanned Traffic Management) system. Provides real-time 3D visualization of drone fleet operations, conflict detection, and airspace management.
 
-Flight Spotlight is a powerful tool that lets you track flights _in real-time_ by subscribing to updates for a specific geographic area. It visualizes live manned and unmanned air traffic on a 3D globe and supports features like geo-fencing. Whether you're working with UTM / U-Space systems or monitoring drone traffic, Flight Spotlight has you covered. It supports Network Remote-ID, broadcast Remote-ID data, and integrates with live ADS-B or other air-traffic data feeds. 
+## Features
 
-For unmanned aviation, Flight Spotlight currently supports ASTM Network and Broadcast Remote-ID standards, with the flexibility to adopt new standards as they emerge.
+- **Live 3D Map** - CesiumJS with Google Photorealistic 3D tiles for real-time drone tracking
+- **Fleet Management** - Register, monitor, and command drones (HOLD, RESUME, LAND)
+- **Conflict Detection** - Visual alerts when drones violate separation minimums
+- **Geofencing** - Define and visualize no-fly zones, restricted areas, and temporary restrictions
+- **Mission Planning** - Create flight plans with waypoints and altitude profiles
+- **Analytics Dashboard** - Flight statistics, conflict history, fleet performance
+- **User Authentication** - Signup/login with session-based auth
 
-Flight Spotlight works seamlessly with [Flight Blender](https://flightblender.com), a complementary server application that processes and streams flight data from various sources like ADS-B, Radar, and FLARM. Flight Blender also provides Network Remote-ID capabilities as a specialized module.
+## Architecture
 
----
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Control Center │────▶│   ATC Server    │◀────│   Drone SDK     │
+│   (This Repo)   │     │ (atc-drone/Rust)│     │ (atc-sdk/Rust)  │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+     Port 5000              Port 3000            Runs on drones
+```
 
-## ✨ Features
+## Quick Start
 
-Flight Spotlight is designed to be compatible with all current and upcoming ASTM and EuroCAE standards for UTM / U-Space. Key features include:
+### Prerequisites
+- Docker & Docker Compose
+- ATC Server running on `localhost:3000`
 
-- **Geofencing Display**: Fully compatible with [EuroCAE ED-269](https://eshop.eurocae.net/eurocae-documents-and-reports/ed-269/).
-- **Network Remote ID**: Display drone traffic via connections to [DSS](https://github.com/interuss/dss) using [Flight Blender](https://flightblender.com).
-- **Manned and Unmanned Traffic**: Visualize ADS-B and other traffic using a streamlined [JSON format](https://github.com/openskies-sh/airtraffic-data-protocol-development) with a Flight Blender backend.
-- **Flight Declarations**: Upload JSON-based [flight declarations](https://github.com/openskies-sh/flight-declaration-protocol-development) or mission plans from ground control stations.
+### Run with Docker
 
----
+```bash
+docker compose up -d
+```
 
-## 🌍 Join the OpenUTM Community
+Access at: http://localhost:5000
 
-Connect with other aviation enthusiasts and developers! Join our Discord community via [this link](https://discord.gg/dnRxpZdd9a) 💫
+### Default Credentials
+- **Guest:** `guest` / `guest123`
+- **Admin:** `admin` / `admin123`
 
----
+## Project Structure
 
-## 📸 Screenshots
+```
+├── views/                 # EJS templates
+│   ├── dashboard.ejs      # Main dashboard
+│   ├── map.ejs            # Live 3D map
+│   ├── fleet.ejs          # Drone list
+│   ├── missions.ejs       # Mission management
+│   ├── geofences.ejs      # Geofence management
+│   ├── conflicts.ejs      # Conflict alerts
+│   ├── analytics.ejs      # Charts & stats
+│   └── settings.ejs       # User settings
+├── static/
+│   ├── js/                # Frontend JavaScript
+│   │   ├── map.js         # Cesium 3D map logic
+│   │   ├── geofences.js   # Geofence visualization
+│   │   └── api-client.js  # ATC server API client
+│   └── css/               # Stylesheets
+├── routes/
+│   └── control.js         # Express routes
+└── server.js              # Main server entry
+```
 
-### Initial Screen
-<img src="images/readme-images/6kfx13d.png" width="600">
+## SDK Documentation
 
-### Declared Flights
-<img src="images/readme-images/zbl6hKx.png" width="600">
+Visit `/docs` for the drone integration SDK documentation, including:
+- Quick start guide
+- API reference
+- Code examples
 
-### 3D + Time Visualization
-<img src="images/readme-images/gysUdTd.jpeg" width="600">
+## Related Repositories
 
----
+- **[atc-drone](https://github.com/YOUR_ORG/atc-drone)** - Rust backend server and SDK
 
-## 🚀 Running Locally / Deployment
+## Tech Stack
 
-To deploy Flight Spotlight locally, refer to the [deployment repository](https://github.com/openutm/deployment). It includes detailed instructions and a sample environment file to get you started.
+- **Frontend:** Node.js, Express, EJS, CesiumJS, Chart.js
+- **3D Tiles:** Google Photorealistic 3D Tiles via Cesium Ion
+- **Backend:** Connects to ATC Server (Rust/Axum)
 
----
+## License
 
-## 🛠️ OpenUTM Stack
-
-Flight Spotlight integrates with the OpenUTM stack to visualize flight tracking data. It works alongside UTM data processing engines like [Flight Blender](https://github.com/openskies-sh/flight-blender). Check out the diagram below for more details:
-
-![OpenUTMStack](images/openutm-stack.png)
-
----
-
-## 🎨 Logo Source
-
-The logo was created using [Hatchful](https://hatchful.shopify.com/).
+Apache 2.0

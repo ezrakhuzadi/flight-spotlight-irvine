@@ -1,0 +1,68 @@
+<%- include('layouts/main', { title: 'Fleet' , activePage: 'fleet' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="section-header">
+        <div>
+            <h1 class="page-title">Drone Fleet</h1>
+            <p class="page-subtitle">Manage connected drones</p>
+        </div>
+        <button class="btn btn-primary" id="addDroneBtn">
+            <span>+</span>
+            <span>Add Drone</span>
+        </button>
+    </div>
+
+    <!-- Fleet Stats -->
+    <div class="stats-grid mb-md" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="stat-card">
+            <div class="stat-value highlight-green" id="fleetOnline">--</div>
+            <div class="stat-label">Online</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value highlight-yellow" id="fleetFlying">--</div>
+            <div class="stat-label">In Flight</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="fleetOffline">--</div>
+            <div class="stat-label">Offline</div>
+        </div>
+    </div>
+
+    <!-- Drone List -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">
+                <span>All Drones</span>
+            </div>
+            <div class="flex gap-sm">
+                <button class="btn btn-ghost btn-sm active" data-filter="all">All</button>
+                <button class="btn btn-ghost btn-sm" data-filter="online">Online</button>
+                <button class="btn btn-ghost btn-sm" data-filter="flying">Flying</button>
+            </div>
+        </div>
+        <div class="card-body" id="droneList">
+            <!-- Drone items will be populated here -->
+            <div class="empty-state">
+                <div class="empty-state-text">No drones registered</div>
+                <button class="btn btn-primary mt-md" id="addFirstDrone">Add Your First Drone</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Drone Detail Sidebar (hidden by default) -->
+    <aside class="sidebar-panel" id="droneDetailSidebar" style="display: none;">
+        <div class="card-header">
+            <div class="card-title">
+                <span id="sidebarDroneName">Drone Details</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="closeSidebar">X</button>
+        </div>
+        <div class="card-body" id="sidebarContent">
+            <!-- Drone details populated dynamically -->
+        </div>
+    </aside>
+    `,
+    scripts: `
+    <script src="/assets/js/fleet.js"></script>
+    `
+    }) %>

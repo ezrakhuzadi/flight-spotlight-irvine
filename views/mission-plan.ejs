@@ -1,0 +1,99 @@
+<%- include('layouts/main', { title: 'Plan Mission' , activePage: 'missions' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="section-header">
+        <div>
+            <h1 class="page-title">Plan New Mission</h1>
+            <p class="page-subtitle">Create a flight plan for your drone</p>
+        </div>
+        <a href="/control/missions" class="btn btn-ghost">Cancel</a>
+    </div>
+
+    <!-- Step Indicator -->
+    <div class="step-indicator mb-lg">
+        <div class="step active" data-step="1">
+            <div class="step-number">1</div>
+            <div class="step-label">Select Drone</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step" data-step="2">
+            <div class="step-number">2</div>
+            <div class="step-label">Define Route</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step" data-step="3">
+            <div class="step-number">3</div>
+            <div class="step-label">Set Parameters</div>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step" data-step="4">
+            <div class="step-number">4</div>
+            <div class="step-label">Review & Submit</div>
+        </div>
+    </div>
+
+    <div class="grid-2-col">
+        <!-- Left: Form -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Step 1: Select Drone</div>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">Select Drone</label>
+                    <select class="form-select" id="droneSelect">
+                        <option value="">-- Select a drone --</option>
+                    </select>
+                    <small class="form-help">Choose the drone that will execute this mission</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Mission Name</label>
+                    <input type="text" class="form-input" id="missionName" placeholder="e.g., Survey Route A">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Mission Type</label>
+                    <select class="form-select" id="missionType">
+                        <option value="delivery">Delivery</option>
+                        <option value="survey">Survey/Mapping</option>
+                        <option value="inspection">Infrastructure Inspection</option>
+                        <option value="patrol">Patrol Route</option>
+                        <option value="custom">Custom Route</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Priority</label>
+                    <select class="form-select" id="missionPriority">
+                        <option value="normal">Normal</option>
+                        <option value="high">High Priority</option>
+                        <option value="emergency">Emergency</option>
+                    </select>
+                </div>
+
+                <div class="flex gap-sm mt-lg">
+                    <button class="btn btn-primary" id="nextStep">Next: Define Route</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Map Preview -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Route Preview</div>
+            </div>
+            <div class="card-body"
+                style="min-height: 400px; display: flex; align-items: center; justify-content: center;">
+                <div class="empty-state">
+                    <div class="empty-state-text">Route preview will appear here</div>
+                    <p class="text-muted mt-sm">Select a drone and define waypoints to see the route</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/mission-plan.js"></script>
+    `
+    }) %>

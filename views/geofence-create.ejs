@@ -1,0 +1,85 @@
+<%- include('layouts/main', { title: 'Create Geofence' , activePage: 'geofences' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="section-header">
+        <div>
+            <h1 class="page-title">Create Geofence</h1>
+            <p class="page-subtitle">Define a new no-fly zone or restricted area</p>
+        </div>
+        <a href="/control/geofences" class="btn btn-ghost">Cancel</a>
+    </div>
+
+    <div class="grid-2-col">
+        <!-- Form -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Geofence Details</div>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input type="text" class="form-input" id="geofenceName" placeholder="e.g., Construction Zone B">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" id="geofenceType">
+                        <option value="no_fly_zone">No-Fly Zone (Hard Restriction)</option>
+                        <option value="restricted_area">Restricted Area (Requires Approval)</option>
+                        <option value="temporary_restriction">Temporary Restriction</option>
+                        <option value="advisory">Advisory Zone (Warning Only)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Lower Altitude (m AGL)</label>
+                    <input type="number" class="form-input" id="lowerAlt" value="0" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Upper Altitude (m AGL)</label>
+                    <input type="number" class="form-input" id="upperAlt" value="120" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Effective Period</label>
+                    <div class="flex gap-sm">
+                        <input type="datetime-local" class="form-input" id="startTime">
+                        <span class="text-muted" style="padding: 12px;">to</span>
+                        <input type="datetime-local" class="form-input" id="endTime">
+                    </div>
+                    <small class="form-help">Leave blank for permanent geofence</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Reason / Notes</label>
+                    <textarea class="form-input" id="notes" rows="3"
+                        placeholder="Why is this geofence needed?"></textarea>
+                </div>
+
+                <div class="flex gap-sm mt-lg">
+                    <button class="btn btn-primary" id="createGeofence">Create Geofence</button>
+                    <button class="btn btn-ghost" id="drawOnMap">Draw on Map</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map for drawing -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Draw Boundary</div>
+            </div>
+            <div class="card-body"
+                style="min-height: 400px; display: flex; align-items: center; justify-content: center; background: var(--bg-primary);">
+                <div class="empty-state">
+                    <div class="empty-state-text">Click and drag to draw a polygon</div>
+                    <p class="text-muted mt-sm">Map drawing tool coming soon</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/geofence-create.js"></script>
+    `
+    }) %>

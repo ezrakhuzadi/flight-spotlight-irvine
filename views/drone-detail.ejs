@@ -1,0 +1,150 @@
+<%- include('layouts/main', { title: 'Drone Detail' , activePage: 'fleet' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="section-header">
+        <div>
+            <h1 class="page-title">Drone: <span id="droneId">
+                    <%= droneId %>
+                </span></h1>
+            <p class="page-subtitle">Real-time status and management</p>
+        </div>
+        <div class="flex gap-sm">
+            <button class="btn btn-warning" id="holdDrone">HOLD</button>
+            <button class="btn btn-success" id="resumeDrone">RESUME</button>
+            <a href="/control/map?track=<%= droneId %>" class="btn btn-ghost">Track on Map</a>
+        </div>
+    </div>
+
+    <div class="grid-2-col">
+        <!-- Left: Status and Telemetry -->
+        <div>
+            <!-- Status Card -->
+            <div class="card mb-md">
+                <div class="card-header">
+                    <div class="card-title">Status</div>
+                </div>
+                <div class="card-body">
+                    <div class="flex items-center gap-md mb-md">
+                        <span class="status-dot flying" id="statusDot"></span>
+                        <span class="status-badge flying" id="statusBadge">In Flight</span>
+                    </div>
+                    <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+                        <div class="stat-card">
+                            <div class="stat-value" id="altitude">50m</div>
+                            <div class="stat-label">Altitude</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="speed">10 m/s</div>
+                            <div class="stat-label">Speed</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="heading">90 deg</div>
+                            <div class="stat-label">Heading</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="battery">--</div>
+                            <div class="stat-label">Battery</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Position -->
+            <div class="card mb-md">
+                <div class="card-header">
+                    <div class="card-title">Position</div>
+                </div>
+                <div class="card-body font-mono" style="font-size: 12px;">
+                    <div class="detail-row">
+                        <span class="detail-label">Latitude</span>
+                        <span class="detail-value" id="lat">33.684600</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Longitude</span>
+                        <span class="detail-value" id="lon">-117.826500</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Last Update</span>
+                        <span class="detail-value" id="lastUpdate">Just now</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Commands -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Send Command</div>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label class="form-label">Command Type</label>
+                        <select class="form-select" id="commandType">
+                            <option value="hold">HOLD (Hover in place)</option>
+                            <option value="resume">RESUME (Continue mission)</option>
+                            <option value="land">LAND (Emergency landing)</option>
+                            <option value="rtl">RETURN TO LAUNCH</option>
+                            <option value="altitude">CHANGE ALTITUDE</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="altitudeGroup" style="display: none;">
+                        <label class="form-label">Target Altitude (m)</label>
+                        <input type="number" class="form-input" id="targetAltitude" value="50">
+                    </div>
+                    <button class="btn btn-primary" id="sendCommand">Send Command</button>
+                    <span class="text-muted ml-sm" id="commandStatus"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Flight History and Map -->
+        <div>
+            <!-- Mini Map -->
+            <div class="card mb-md">
+                <div class="card-header">
+                    <div class="card-title">Location</div>
+                </div>
+                <div class="card-body"
+                    style="min-height: 250px; display: flex; align-items: center; justify-content: center; background: var(--bg-primary);">
+                    <div class="empty-state">
+                        <div class="empty-state-text">Mini-map preview</div>
+                        <a href="/control/map?track=<%= droneId %>" class="btn btn-ghost btn-sm mt-sm">Open Full Map</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Flight History -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Recent Activity</div>
+                </div>
+                <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Rerouted (Conflict avoidance)</div>
+                            <div class="list-item-subtitle">Vertical separation with demo-alpha</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">2m ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Takeoff</div>
+                            <div class="list-item-subtitle">Mission started from Base A</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">5m ago</span>
+                    </div>
+                    <div class="list-item" style="padding: 8px 12px;">
+                        <div class="list-item-content">
+                            <div class="list-item-title">Registered</div>
+                            <div class="list-item-subtitle">Connected to ATC server</div>
+                        </div>
+                        <span class="text-muted" style="font-size: 11px;">6m ago</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/drone-detail.js"></script>
+    `
+    }) %>

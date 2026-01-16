@@ -1,0 +1,104 @@
+<%- include('layouts/main', { title: 'Conflicts' , activePage: 'conflicts' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1 class="page-title">Conflict Management</h1>
+        <p class="page-subtitle">Monitor and resolve airspace conflicts</p>
+    </div>
+
+    <!-- Alert Banner (when conflicts exist) -->
+    <div class="alert alert-danger mb-lg" id="conflictAlert" style="display: none;">
+        <strong>Active Conflicts Detected!</strong>
+        <span id="conflictAlertText">2 conflicts require attention</span>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid mb-lg" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card highlight-red">
+            <div class="stat-value" id="criticalConflicts">0</div>
+            <div class="stat-label">Critical</div>
+        </div>
+        <div class="stat-card highlight-yellow">
+            <div class="stat-value" id="warningConflicts">0</div>
+            <div class="stat-label">Warnings</div>
+        </div>
+        <div class="stat-card highlight-green">
+            <div class="stat-value" id="resolvedToday">0</div>
+            <div class="stat-label">Resolved Today</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="avgResolutionTime">--</div>
+            <div class="stat-label">Avg Resolution</div>
+        </div>
+    </div>
+
+    <div class="grid-2-col">
+        <!-- Active Conflicts -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Active Conflicts</div>
+                <button class="btn btn-ghost btn-sm" id="refreshConflicts">Refresh</button>
+            </div>
+            <div class="card-body" id="conflictList">
+                <div class="empty-state">
+                    <div class="empty-state-text">No active conflicts</div>
+                    <p class="text-muted mt-sm">All airspace is clear</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conflict Detail / Resolution -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Conflict Details</div>
+            </div>
+            <div class="card-body" id="conflictDetail">
+                <div class="empty-state">
+                    <div class="empty-state-text">Select a conflict to view details</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Historical Conflicts -->
+    <div class="card mt-lg">
+        <div class="card-header">
+            <div class="card-title">Recent Conflict History</div>
+            <a href="/control/analytics" class="btn btn-ghost btn-sm">View All Analytics</a>
+        </div>
+        <div class="card-body" id="conflictHistory">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Drones</th>
+                        <th>Severity</th>
+                        <th>Resolution</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>14:23:45</td>
+                        <td>demo-alpha - demo-beta</td>
+                        <td><span class="status-badge flying">Warning</span></td>
+                        <td>Reroute (Vertical)</td>
+                        <td>2.3s</td>
+                    </tr>
+                    <tr>
+                        <td>13:45:12</td>
+                        <td>drone-001 - drone-003</td>
+                        <td><span class="status-badge"
+                                style="background: rgba(239,68,68,0.2); color: var(--accent-red);">Critical</span></td>
+                        <td>Hold + Reroute</td>
+                        <td>5.1s</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/conflicts.js"></script>
+    `
+    }) %>

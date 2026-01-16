@@ -1,0 +1,78 @@
+<%- include('layouts/main', { title: 'Dashboard' , activePage: 'dashboard' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="page-header">
+        <h1 class="page-title">Mission Control Dashboard</h1>
+        <p class="page-subtitle">Real-time overview of drone operations</p>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="stats-grid">
+        <div class="stat-card highlight-green">
+            <div class="stat-value" id="statDronesOnline">--</div>
+            <div class="stat-label">Drones Online</div>
+        </div>
+        <div class="stat-card highlight-yellow">
+            <div class="stat-value" id="statActiveMissions">--</div>
+            <div class="stat-label">Active Missions</div>
+        </div>
+        <div class="stat-card highlight-red">
+            <div class="stat-value" id="statConflicts">0</div>
+            <div class="stat-label">Active Conflicts</div>
+        </div>
+        <div class="stat-card highlight-blue">
+            <div class="stat-value" id="statGeofences">--</div>
+            <div class="stat-label">Geofences</div>
+        </div>
+    </div>
+
+    <!-- Two Column Layout -->
+    <div class="flex gap-md mt-lg" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <!-- Recent Activity -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>Recent Activity</span>
+                </div>
+            </div>
+            <div class="card-body" id="activityFeed">
+                <div class="empty-state">
+                    <div class="empty-state-text">No recent activity</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Alerts -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span>Active Alerts</span>
+                </div>
+            </div>
+            <div class="card-body" id="alertsPanel">
+                <div class="empty-state">
+                    <div class="empty-state-text">No active alerts</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fleet Overview -->
+    <div class="card mt-lg">
+        <div class="card-header">
+            <div class="card-title">
+                <span>Fleet Overview</span>
+            </div>
+            <a href="/control/fleet" class="btn btn-ghost btn-sm">View All</a>
+        </div>
+        <div class="card-body" id="fleetOverview">
+            <div class="empty-state">
+                <div class="empty-state-text">No drones connected</div>
+            </div>
+        </div>
+    </div>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/dashboard.js"></script>
+    `
+    }) %>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title || 'Mission Control' %> | ATC-Drone</title>
+    
+    <!-- SEO -->
+    <meta name="description" content="ATC-Drone Mission Control - Real-time drone traffic management and monitoring">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/assets/css/mission-control.css">
+    
+    <%- typeof head !== 'undefined' ? head : '' %>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <%- include('../partials/header', { activePage: activePage || 'dashboard' }) %>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <%- body %>
+        </main>
+        
+        <!-- Status Bar -->
+        <%- include('../partials/status-bar') %>
+    </div>
+    
+    <!-- Core Scripts -->
+    <script src="/assets/js/api-client.js"></script>
+    <%- typeof scripts !== 'undefined' ? scripts : '' %>
+</body>
+</html>

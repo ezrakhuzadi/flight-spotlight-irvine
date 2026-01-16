@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Mission Control</title>
+    <link rel="stylesheet" href="/assets/css/mission-control.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, var(--bg-primary) 0%, #0a1628 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-sans);
+            margin: 0;
+        }
+
+        .login-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 48px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .login-logo {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: var(--accent-blue);
+            letter-spacing: 2px;
+        }
+
+        .login-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 8px 0;
+        }
+
+        .login-subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 12px;
+        }
+
+        .login-btn-primary {
+            background: var(--gradient-button);
+            color: white;
+        }
+
+        .login-btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+        }
+
+        .login-btn-guest {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .login-btn-guest:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            margin: 24px 0;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        .divider span {
+            padding: 0 16px;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .guest-info {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .guest-info p {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin: 0;
+        }
+
+        .guest-credentials {
+            background: var(--bg-primary);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <div class="login-logo">ATC</div>
+            <h1 class="login-title">Mission Control</h1>
+            <p class="login-subtitle">Drone Fleet Management System</p>
+        </div>
+
+        <% if (typeof error !=='undefined' && error) { %>
+            <div class="error-message">
+                <%= error %>
+            </div>
+            <% } %>
+
+                <form action="/login" method="POST">
+                    <div class="form-group">
+                        <label class="form-label" for="username">Username</label>
+                        <input type="text" id="username" name="username" class="form-input" placeholder="Enter username"
+                            required autocomplete="username">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="password">Password</label>
+                        <input type="password" id="password" name="password" class="form-input"
+                            placeholder="Enter password" required autocomplete="current-password">
+                    </div>
+
+                    <button type="submit" class="login-btn login-btn-primary">
+                        Sign In
+                    </button>
+                </form>
+
+                <div class="divider"><span>or</span></div>
+
+                <form action="/login/guest" method="POST">
+                    <button type="submit" class="login-btn login-btn-guest">
+                        Continue as Guest
+                    </button>
+                </form>
+
+                <div class="guest-info">
+                    <p>Demo credentials for testing:</p>
+                    <div class="guest-credentials">
+                        Username: <strong>guest</strong> | Password: <strong>guest123</strong>
+                    </div>
+                </div>
+
+                <div class="login-link"
+                    style="text-align: center; margin-top: 24px; color: var(--text-muted); font-size: 14px;">
+                    Don't have an account? <a href="/signup"
+                        style="color: var(--accent-blue); text-decoration: none;">Sign up</a>
+                </div>
+    </div>
+</body>
+
+</html>

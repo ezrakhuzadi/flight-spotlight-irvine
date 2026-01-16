@@ -1,0 +1,193 @@
+<%- include('layouts/main', { title: 'Live Map' , activePage: 'map' , head: ` <!-- CesiumJS -->
+    <script src="/assets/Build/Cesium/Cesium.js"></script>
+    <style>
+        @import url(/assets/Build/Cesium/Widgets/widgets.css);
+
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+        }
+
+        .map-sidebar {
+            width: 360px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .map-sidebar-header {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-primary);
+        }
+
+        .map-sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-md);
+        }
+
+        .drone-track-item {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-bottom: 4px;
+        }
+
+        .drone-track-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .drone-track-item.selected {
+            background: var(--bg-active);
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        /* Camera Controls Overlay */
+        .map-controls-overlay {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 4px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            padding: 6px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .control-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .control-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .control-btn.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .control-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+        }
+    </style>
+    `,
+    body: `
+    <!-- Map Container (no padding) -->
+    <div class="content-area no-padding" style="display: flex;">
+        <!-- Cesium Globe -->
+        <div style="flex: 1; position: relative;">
+            <div id="cesiumContainer"></div>
+
+            <!-- Camera Controls Overlay -->
+            <div class="map-controls-overlay">
+                <!-- Camera Mode -->
+                <div class="control-group">
+                    <span class="control-label">Camera</span>
+                    <button class="control-btn active" id="cam-free-btn"
+                        onclick="MapControl.setCameraMode('free')">Free</button>
+                    <button class="control-btn" id="cam-orbit-btn"
+                        onclick="MapControl.setCameraMode('orbit')">Orbit</button>
+                    <button class="control-btn" id="cam-cockpit-btn"
+                        onclick="MapControl.setCameraMode('cockpit')">Cockpit</button>
+                </div>
+
+                <!-- Time of Day -->
+                <div class="control-group">
+                    <span class="control-label">Time</span>
+                    <button class="control-btn active" id="tod-realtime-btn"
+                        onclick="MapControl.setTimeOfDay('realtime')">Real</button>
+                    <button class="control-btn" id="tod-day-btn" onclick="MapControl.setTimeOfDay('day')">Day</button>
+                    <button class="control-btn" id="tod-night-btn"
+                        onclick="MapControl.setTimeOfDay('night')">Night</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Sidebar -->
+        <aside class="map-sidebar">
+            <div class="map-sidebar-header">
+                <div class="card-title">
+                    <span>Live Tracking</span>
+                </div>
+            </div>
+            <div class="map-sidebar-content">
+                <!-- Active Drones -->
+                <div class="section-subtitle">Active Drones</div>
+                <div id="activeDronesList">
+                    <div class="empty-state" style="padding: 16px;">
+                        <div class="empty-state-text text-muted">No active drones</div>
+                    </div>
+                </div>
+
+                <!-- Conflicts -->
+                <div class="section-subtitle mt-lg">Conflicts</div>
+                <div id="conflictsList">
+                    <div class="status-badge online" style="margin: 8px 0;">
+                        <span class="status-dot online"></span>
+                        <span>All Clear</span>
+                    </div>
+                </div>
+
+                <!-- Selected Drone Details -->
+                <div id="selectedDronePanel" style="display: none;">
+                    <div class="section-subtitle mt-lg">Selected Drone</div>
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="flex items-center gap-sm mb-md">
+                                <span class="status-dot flying" id="selectedDroneStatus"></span>
+                                <strong id="selectedDroneName">--</strong>
+                            </div>
+                            <div class="text-muted font-mono" style="font-size: 12px;">
+                                <div>Lat: <span id="selectedDroneLat">--</span></div>
+                                <div>Lon: <span id="selectedDroneLon">--</span></div>
+                                <div>Alt: <span id="selectedDroneAlt">--</span>m</div>
+                                <div>Speed: <span id="selectedDroneSpeed">--</span> m/s</div>
+                            </div>
+                            <div class="flex gap-sm mt-md">
+                                <button class="btn btn-warning btn-sm flex-1" id="btnHoldDrone">HOLD</button>
+                                <button class="btn btn-success btn-sm flex-1" id="btnResumeDrone">RESUME</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+    `,
+    scripts: `
+    <script src="/assets/js/map.js"></script>
+    `
+    }) %>

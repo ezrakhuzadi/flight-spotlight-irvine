@@ -1,0 +1,55 @@
+<%- include('layouts/main', { title: 'Missions' , activePage: 'missions' , body: ` <div class="content-area">
+    <!-- Page Header -->
+    <div class="section-header">
+        <div>
+            <h1 class="page-title">Missions</h1>
+            <p class="page-subtitle">Flight plans and operations</p>
+        </div>
+        <a href="/control/missions/plan" class="btn btn-primary">
+            <span>+</span>
+            <span>Plan Mission</span>
+        </a>
+    </div>
+
+    <!-- Active Missions -->
+    <div class="section-subtitle">Active Now</div>
+    <div id="activeMissions" class="mb-md">
+        <div class="empty-state" style="padding: 24px;">
+            <div class="empty-state-text text-muted">No active missions</div>
+        </div>
+    </div>
+
+    <!-- Pending Approval -->
+    <div class="section-subtitle">Pending Approval</div>
+    <div id="pendingMissions" class="mb-md">
+        <div class="empty-state" style="padding: 24px;">
+            <div class="empty-state-text text-muted">No pending missions</div>
+        </div>
+    </div>
+
+    <!-- Completed Today -->
+    <div class="section-subtitle">Completed Today</div>
+    <div id="completedMissions">
+        <div class="empty-state" style="padding: 24px;">
+            <div class="empty-state-text text-muted">No completed missions today</div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Mission Detail Sidebar -->
+    <aside class="sidebar-panel" id="missionDetailSidebar" style="display: none;">
+        <div class="card-header">
+            <div class="card-title">
+                <span id="sidebarMissionName">Mission Details</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="closeMissionSidebar">X</button>
+        </div>
+        <div class="card-body" id="missionSidebarContent">
+            <!-- Mission details populated dynamically -->
+        </div>
+    </aside>
+    `,
+    scripts: `
+    <script src="/assets/js/missions.js"></script>
+    `
+    }) %>

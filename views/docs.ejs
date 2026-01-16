@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDK Documentation - Control Center</title>
+    <link rel="stylesheet" href="/assets/css/mission-control.css">
+    <style>
+        body {
+            background: var(--bg-deep);
+            min-height: 100vh;
+            font-family: var(--font-sans);
+            margin: 0;
+            color: var(--text-primary);
+        }
+
+        .docs-header {
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .docs-brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .docs-brand a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .docs-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .docs-layout {
+            display: flex;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .docs-sidebar {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            min-height: calc(100vh - 60px);
+            padding: 24px 0;
+            position: sticky;
+            top: 0;
+        }
+
+        .docs-nav-section {
+            padding: 0 16px;
+            margin-bottom: 24px;
+        }
+
+        .docs-nav-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            padding: 0 12px;
+        }
+
+        .docs-nav-link {
+            display: block;
+            padding: 8px 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.15s;
+        }
+
+        .docs-nav-link:hover,
+        .docs-nav-link.active {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .docs-content {
+            flex: 1;
+            padding: 32px 48px;
+            max-width: 900px;
+        }
+
+        .docs-content h1 {
+            font-size: 32px;
+            margin: 0 0 8px 0;
+            color: var(--text-primary);
+        }
+
+        .docs-content h2 {
+            font-size: 22px;
+            margin: 40px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .docs-content h3 {
+            font-size: 16px;
+            margin: 24px 0 12px 0;
+            color: var(--text-primary);
+        }
+
+        .docs-content p {
+            line-height: 1.7;
+            color: var(--text-secondary);
+            margin: 0 0 16px 0;
+        }
+
+        .docs-content ul,
+        .docs-content ol {
+            color: var(--text-secondary);
+            line-height: 1.7;
+            padding-left: 24px;
+        }
+
+        .docs-content li {
+            margin-bottom: 8px;
+        }
+
+        .code-block {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            overflow-x: auto;
+        }
+
+        .code-block pre {
+            margin: 0;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .code-inline {
+            background: var(--bg-primary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--accent-cyan);
+        }
+
+        .api-endpoint {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin: 16px 0;
+            overflow: hidden;
+        }
+
+        .api-endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .api-method {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .api-method.get {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+        }
+
+        .api-method.post {
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--accent-blue);
+        }
+
+        .api-method.put {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .api-method.delete {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+        }
+
+        .api-path {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .api-endpoint-body {
+            padding: 16px;
+        }
+
+        .callout {
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+            border-left: 4px solid;
+        }
+
+        .callout.info {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: var(--accent-blue);
+        }
+
+        .callout.warning {
+            background: rgba(251, 191, 36, 0.1);
+            border-color: var(--accent-yellow);
+        }
+
+        .callout.success {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--accent-green);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="docs-header">
+        <div class="docs-brand">
+            <a href="/control">Control Center</a>
+            <span class="docs-title">SDK Documentation</span>
+        </div>
+        <div>
+            <% if (user) { %>
+                <a href="/control"
+                    style="color: var(--text-secondary); text-decoration: none; margin-right: 16px;">Dashboard</a>
+                <span style="color: var(--text-muted);">
+                    <%= user.name %>
+                </span>
+                <% } else { %>
+                    <a href="/login" style="color: var(--accent-blue); text-decoration: none;">Sign In</a>
+                    <% } %>
+        </div>
+    </header>
+
+    <div class="docs-layout">
+        <nav class="docs-sidebar">
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Getting Started</div>
+                <a href="#overview" class="docs-nav-link active">Overview</a>
+                <a href="#quickstart" class="docs-nav-link">Quick Start</a>
+                <a href="#installation" class="docs-nav-link">Installation</a>
+            </div>
+
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">SDK Reference</div>
+                <a href="#client" class="docs-nav-link">AtcClient</a>
+                <a href="#registration" class="docs-nav-link">Registration</a>
+                <a href="#telemetry" class="docs-nav-link">Telemetry</a>
+                <a href="#commands" class="docs-nav-link">Commands</a>
+            </div>
+
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">API Reference</div>
+                <a href="#api-drones" class="docs-nav-link">Drones</a>
+                <a href="#api-telemetry" class="docs-nav-link">Telemetry</a>
+                <a href="#api-commands" class="docs-nav-link">Commands</a>
+                <a href="#api-conflicts" class="docs-nav-link">Conflicts</a>
+            </div>
+
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Examples</div>
+                <a href="#example-basic" class="docs-nav-link">Basic Drone</a>
+                <a href="#example-mission" class="docs-nav-link">Mission Flight</a>
+            </div>
+        </nav>
+
+        <main class="docs-content">
+            <h1 id="overview">ATC-Drone SDK</h1>
+            <p>Connect your drone to the Control Center for real-time tracking, conflict detection, and automated
+                traffic management.</p>
+
+            <div class="callout info">
+                <strong>ATC Server URL:</strong> <code class="code-inline">http://localhost:3000</code><br>
+                Make sure the ATC server is running before connecting your drone.
+            </div>
+
+            <h2 id="quickstart">Quick Start</h2>
+            <p>Get your drone connected in 5 minutes:</p>
+
+            <h3>1. Add the SDK to your project</h3>
+            <div class="code-block">
+                <pre># Add to your Cargo.toml
+[dependencies]
+atc-sdk = { path = "../atc-drone/crates/atc-sdk" }
+tokio = { version = "1.0", features = ["full"] }</pre>
+            </div>
+
+            <h3>2. Connect and send telemetry</h3>
+            <div class="code-block">
+                <pre>use atc_sdk::AtcClient;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Connect to ATC server
+    let client = AtcClient::new("http://localhost:3000");
+    
+    // Register your drone
+    client.register(None).await?;
+    println!("Drone registered: {}", client.drone_id().unwrap());
+    
+    // Send position updates
+    loop {
+        client.send_position(
+            33.6846,    // latitude
+            -117.8265,  // longitude
+            50.0,       // altitude (meters)
+            90.0,       // heading (degrees)
+            10.0        // speed (m/s)
+        ).await?;
+        
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}</pre>
+            </div>
+
+            <h2 id="installation">Installation</h2>
+
+            <h3>Prerequisites</h3>
+            <ul>
+                <li>Rust 1.70+ (for SDK)</li>
+                <li>ATC Server running on localhost:3000</li>
+                <li>Network access between drone and server</li>
+            </ul>
+
+            <h3>Clone the Repository</h3>
+            <div class="code-block">
+                <pre>git clone https://github.com/your-org/atc-drone.git
+cd atc-drone
+cargo build --release</pre>
+            </div>
+
+            <h3>Run the ATC Server</h3>
+            <div class="code-block">
+                <pre>cargo run -p atc-server --release</pre>
+            </div>
+
+            <h2 id="client">AtcClient</h2>
+            <p>The main client for communicating with the ATC server.</p>
+
+            <h3>Creating a Client</h3>
+            <div class="code-block">
+                <pre>use atc_sdk::AtcClient;
+
+// Create client with default server URL
+let client = AtcClient::new("http://localhost:3000");
+
+// With custom timeout
+let client = AtcClient::with_timeout("http://localhost:3000", Duration::from_secs(5));</pre>
+            </div>
+
+            <h2 id="registration">Registration</h2>
+            <p>Before sending telemetry, drones must register with the ATC server.</p>
+
+            <div class="code-block">
+                <pre>// Register with auto-generated ID
+let drone_id = client.register(None).await?;
+
+// Register with custom ID
+let drone_id = client.register(Some("my-drone-001")).await?;
+
+// Register with owner (for user-specific tracking)
+client.register_with_owner(Some("my-drone"), Some("username")).await?;</pre>
+            </div>
+
+            <h2 id="telemetry">Telemetry</h2>
+            <p>Send position updates to the ATC server for tracking and conflict detection.</p>
+
+            <div class="code-block">
+                <pre>// Basic position update
+client.send_position(lat, lon, altitude_m, heading_deg, speed_mps).await?;
+
+// With owner tracking (for user-specific drone visibility)
+client.send_position_with_owner(
+    lat, lon, altitude_m, heading_deg, speed_mps,
+    Some("username".to_string())
+).await?;</pre>
+            </div>
+
+            <div class="callout warning">
+                <strong>Update Frequency:</strong> Send telemetry at least once per second for accurate conflict
+                detection.
+                Drones that don't send updates for 10 seconds are marked as "Lost".
+            </div>
+
+            <h2 id="commands">Commands</h2>
+            <p>Drones can poll for and respond to commands from the Control Center.</p>
+
+            <div class="code-block">
+                <pre>// Poll for pending commands
+let commands = client.get_commands().await?;
+
+for cmd in commands {
+    match cmd.command_type.as_str() {
+        "HOLD" => {
+            // Hover in place for cmd.duration_s seconds
+            println!("HOLD command received");
+        }
+        "RESUME" => {
+            // Continue normal operation
+            println!("RESUME command received");
+        }
+        "LAND" => {
+            // Emergency landing
+            println!("LAND command received");
+        }
+        "ALTITUDE" => {
+            // Change altitude to cmd.target_altitude_m
+            println!("Change altitude to {}m", cmd.target_altitude_m);
+        }
+        _ => {}
+    }
+    
+    // Acknowledge command
+    client.ack_command(&cmd.id).await?;
+}</pre>
+            </div>
+
+            <h2 id="api-drones">API: Drones</h2>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/drones</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List all registered drones.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner username</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/drones/register</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Register a new drone.</p>
+                    <strong>Request Body:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "optional-custom-id",
+  "owner_id": "username"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-telemetry">API: Telemetry</h2>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/telemetry</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Send drone telemetry update.</p>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "my-drone-001",
+  "owner_id": "username",
+  "lat": 33.6846,
+  "lon": -117.8265,
+  "altitude_m": 50.0,
+  "heading_deg": 90.0,
+  "speed_mps": 10.0,
+  "velocity_x": 10.0,
+  "velocity_y": 0.0,
+  "velocity_z": 0.0
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-commands">API: Commands</h2>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/drones/{drone_id}/commands</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Get pending commands for a drone.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/drones/{drone_id}/command</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Send a command to a drone.</p>
+                    <div class="code-block">
+                        <pre>{
+  "command_type": "HOLD",
+  "duration_s": 30
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-conflicts">API: Conflicts</h2>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/conflicts</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Get active airspace conflicts.</p>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>[
+  {
+    "id": "conflict-uuid",
+    "drone1_id": "drone-alpha",
+    "drone2_id": "drone-beta",
+    "distance_m": 45.2,
+    "severity": "warning",
+    "time_to_closest": 5.3
+  }
+]</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="example-basic">Example: Basic Drone</h2>
+            <p>A complete example of a drone that registers and sends position updates:</p>
+
+            <div class="code-block">
+                <pre>use atc_sdk::AtcClient;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let client = AtcClient::new("http://localhost:3000");
+    
+    // Register
+    client.register_with_owner(
+        Some("my-drone"),
+        Some("myusername")
+    ).await?;
+    
+    let mut lat = 33.6846;
+    let lon = -117.8265;
+    let altitude = 50.0;
+    let heading = 90.0;
+    let speed = 5.0;
+    
+    loop {
+        // Move north slowly
+        lat += 0.00001;
+        
+        // Send telemetry
+        client.send_position_with_owner(
+            lat, lon, altitude, heading, speed,
+            Some("myusername".to_string())
+        ).await?;
+        
+        // Check for commands
+        if let Ok(commands) = client.get_commands().await {
+            for cmd in commands {
+                println!("Received command: {:?}", cmd);
+                // Handle command...
+            }
+        }
+        
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}</pre>
+            </div>
+
+            <div class="callout success">
+                <strong>Demo Available:</strong> Run <code
+                    class="code-inline">cargo run -p atc-cli --bin demo_scenario --release -- --owner myusername</code>
+                to see a full demo with two drones and collision avoidance.
+            </div>
+
+            <h2 id="example-mission">Example: Mission Flight</h2>
+            <p>Execute a predefined flight path with waypoints:</p>
+
+            <div class="code-block">
+                <pre>use atc_sdk::AtcClient;
+
+struct Waypoint { lat: f64, lon: f64, alt: f64 }
+
+async fn fly_mission(client: &AtcClient, waypoints: Vec<Waypoint>) {
+    for (i, wp) in waypoints.iter().enumerate() {
+        println!("Flying to waypoint {}", i + 1);
+        
+        // Fly to waypoint (simplified)
+        for _ in 0..100 {
+            client.send_position(
+                wp.lat, wp.lon, wp.alt,
+                calculate_heading(), 10.0
+            ).await.ok();
+            
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        println!("Reached waypoint {}", i + 1);
+    }
+}</pre>
+            </div>
+        </main>
+    </div>
+</body>
+
+</html>
