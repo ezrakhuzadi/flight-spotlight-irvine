@@ -72,7 +72,7 @@ Visit `/docs` for the drone integration SDK documentation, including:
 
 ## Related Repositories
 
-- **[atc-drone](https://github.com/YOUR_ORG/atc-drone)** - Rust backend server and SDK
+- **[atc-drone](https://github.com/ezrakhuzadi/atc-drone)** - Rust backend server and SDK
 
 ## Tech Stack
 
