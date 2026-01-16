@@ -416,17 +416,17 @@
         // Add/update conflict lines
         for (const conflict of conflicts) {
           const conflictId = `${conflict.drone1_id}-${conflict.drone2_id}`;
-          
+
           // Get drone positions
           const drone1 = droneEntities.get(conflict.drone1_id);
           const drone2 = droneEntities.get(conflict.drone2_id);
-          
+
           if (!drone1 || !drone2) continue;
-          
+
           // Get current positions from entities
           const pos1 = drone1.position?.getValue(viewer.clock.currentTime);
           const pos2 = drone2.position?.getValue(viewer.clock.currentTime);
-          
+
           if (!pos1 || !pos2) continue;
 
           // Color based on severity
@@ -468,7 +468,7 @@
               `
             });
             conflictEntities.set(conflictId, entity);
-            
+
             console.log(`[CONFLICT] ${conflict.severity.toUpperCase()}: ${conflict.drone1_id} <-> ${conflict.drone2_id} (${conflict.distance_m.toFixed(0)}m)`);
           }
 
@@ -498,6 +498,90 @@
       // Poll conflicts every 2 seconds
       setInterval(fetchConflicts, 2000);
       fetchConflicts(); // Initial fetch
+
+      // ========== GEOFENCE VISUALIZATION ==========
+      const geofenceEntities = new Map(); // geofence_id -> entity
+
+      async function fetchGeofences() {
+        try {
+          const response = await fetch('http://localhost:3000/v1/geofences');
+          if (response.ok) {
+            const geofences = await response.json();
+            renderGeofences(geofences);
+          }
+        } catch (e) {
+          // ATC server might not be running - silently ignore
+        }
+      }
+
+      function renderGeofences(geofences) {
+        // Remove old geofence entities that no longer exist
+        const currentIds = new Set(geofences.map(g => g.id));
+        for (const [id, entity] of geofenceEntities) {
+          if (!currentIds.has(id)) {
+            viewer.entities.remove(entity);
+            geofenceEntities.delete(id);
+          }
+        }
+
+        for (const geofence of geofences) {
+          if (geofenceEntities.has(geofence.id)) continue; // Already rendered
+
+          // Convert polygon [lat, lon] to Cesium positions
+          const positions = geofence.polygon.map(([lat, lon]) =>
+            Cesium.Cartesian3.fromDegrees(lon, lat, geofence.upper_altitude_m)
+          );
+
+          // Color based on type
+          let fillColor, outlineColor;
+          switch (geofence.geofence_type) {
+            case 'no_fly_zone':
+              fillColor = Cesium.Color.RED.withAlpha(0.3);
+              outlineColor = Cesium.Color.RED;
+              break;
+            case 'restricted_area':
+              fillColor = Cesium.Color.ORANGE.withAlpha(0.25);
+              outlineColor = Cesium.Color.ORANGE;
+              break;
+            case 'temporary_restriction':
+              fillColor = Cesium.Color.YELLOW.withAlpha(0.2);
+              outlineColor = Cesium.Color.YELLOW;
+              break;
+            default:
+              fillColor = Cesium.Color.BLUE.withAlpha(0.15);
+              outlineColor = Cesium.Color.BLUE;
+          }
+
+          const entity = viewer.entities.add({
+            id: `geofence-${geofence.id}`,
+            name: geofence.name,
+            polygon: {
+              hierarchy: positions,
+              height: geofence.lower_altitude_m,
+              extrudedHeight: geofence.upper_altitude_m,
+              material: fillColor,
+              outline: true,
+              outlineColor: outlineColor,
+              outlineWidth: 2
+            },
+            description: `
+              <table class="cesium-infoBox-defaultTable">
+                <tr><td>Name:</td><td>${geofence.name}</td></tr>
+                <tr><td>Type:</td><td>${geofence.geofence_type.replace('_', ' ').toUpperCase()}</td></tr>
+                <tr><td>Floor:</td><td>${geofence.lower_altitude_m} m</td></tr>
+                <tr><td>Ceiling:</td><td>${geofence.upper_altitude_m} m</td></tr>
+                <tr><td>Status:</td><td>${geofence.active ? 'Active' : 'Inactive'}</td></tr>
+              </table>
+            `
+          });
+          geofenceEntities.set(geofence.id, entity);
+          console.log(`[GEOFENCE] Rendered: ${geofence.name} (${geofence.geofence_type})`);
+        }
+      }
+
+      // Poll geofences every 10 seconds
+      setInterval(fetchGeofences, 10000);
+      fetchGeofences(); // Initial fetch
 
       // Handle selection to show planned route & update camera
       viewer.selectedEntityChanged.addEventListener((entity) => {
