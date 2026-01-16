@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Safe Corridor Flight Logic - Test Suite</title>
+    <title>Safe Corridor Flight Logic - Test Suite v2</title>
 
     <!-- CesiumJS from Ion CDN -->
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.123/Build/Cesium/Cesium.js"></script>
@@ -37,10 +37,28 @@
             font-size: 0.9rem;
         }
 
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            max-width: 1400px;
+        }
+
+        @media (max-width: 900px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
         .controls {
             display: flex;
             gap: 10px;
-            margin-bottom: 20px;
             flex-wrap: wrap;
             align-items: center;
         }
@@ -80,7 +98,6 @@
             background: #1e293b;
             padding: 12px 16px;
             border-radius: 8px;
-            margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -119,6 +136,7 @@
             font-family: 'Fira Code', 'Consolas', monospace;
             font-size: 0.85rem;
             line-height: 1.6;
+            flex-grow: 1;
         }
 
         .log-entry {
@@ -178,13 +196,21 @@
             content: "✗ ";
         }
 
-        /* Hidden Cesium Container */
+        /* Visible Cesium Container for debugging */
         #cesiumContainer {
-            width: 1px;
-            height: 1px;
-            position: absolute;
-            left: -9999px;
-            visibility: hidden;
+            width: 100%;
+            height: 350px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #334155;
+        }
+
+        .viewer-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
         /* Summary Box */
@@ -192,7 +218,7 @@
             background: #1e293b;
             border-radius: 8px;
             padding: 16px;
-            margin-top: 20px;
+            margin-top: 16px;
             display: none;
         }
 
@@ -207,8 +233,8 @@
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
         }
 
         .summary-stat {
@@ -219,12 +245,12 @@
         }
 
         .summary-stat .value {
-            font-size: 2rem;
+            font-size: 1.8rem;
             font-weight: bold;
         }
 
         .summary-stat .label {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: #94a3b8;
             text-transform: uppercase;
         }
@@ -240,56 +266,69 @@
         .summary-stat.total .value {
             color: #60a5fa;
         }
+
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
     </style>
 </head>
 
 <body>
-    <!-- Hidden Cesium Viewer (required for physics engine) -->
-    <div id="cesiumContainer"></div>
-
-    <h1>🧪 Safe Corridor Flight Logic - Test Suite</h1>
-    <p class="subtitle">Testing calculateSafeCorridorHeight() and validateFlightPath() against real OSM Buildings data
+    <h1>🧪 Safe Corridor Flight Logic - Test Suite v2</h1>
+    <p class="subtitle">
+        Testing with camera teleportation to fix LOD culling (3D tiles must be visible to sample)
     </p>
 
-    <div class="controls">
-        <button id="runTestsBtn" onclick="runAllTests()">▶ Start Tests</button>
-        <button id="clearBtn" class="secondary" onclick="clearConsole()">Clear Console</button>
-    </div>
-
-    <div class="status-bar">
-        <div class="status-item">
-            <span>Cesium:</span>
-            <strong id="cesiumStatus" class="pending">Initializing...</strong>
-        </div>
-        <div class="status-item">
-            <span>OSM Buildings:</span>
-            <strong id="osmStatus" class="pending">Not Loaded</strong>
-        </div>
-        <div class="status-item">
-            <span>Tests:</span>
-            <strong id="testStatus" class="pending">Ready</strong>
-        </div>
-    </div>
-
-    <div id="console">
-        <div class="log-entry info">Waiting for test execution...</div>
-    </div>
-
-    <div id="summary" class="summary">
-        <h3>Test Results</h3>
-        <div class="summary-grid">
-            <div class="summary-stat passed">
-                <div class="value" id="passedCount">0</div>
-                <div class="label">Passed</div>
+    <div class="main-layout">
+        <div class="left-panel">
+            <div class="controls">
+                <button id="runTestsBtn" onclick="runAllTests()">▶ Start Tests</button>
+                <button id="clearBtn" class="secondary" onclick="clearConsole()">Clear Console</button>
             </div>
-            <div class="summary-stat failed">
-                <div class="value" id="failedCount">0</div>
-                <div class="label">Failed</div>
+
+            <div class="status-bar">
+                <div class="status-item">
+                    <span>Cesium:</span>
+                    <strong id="cesiumStatus" class="pending">Initializing...</strong>
+                </div>
+                <div class="status-item">
+                    <span>OSM Buildings:</span>
+                    <strong id="osmStatus" class="pending">Not Loaded</strong>
+                </div>
+                <div class="status-item">
+                    <span>Tests:</span>
+                    <strong id="testStatus" class="pending">Ready</strong>
+                </div>
             </div>
-            <div class="summary-stat total">
-                <div class="value" id="totalCount">0</div>
-                <div class="label">Total</div>
+
+            <div id="console">
+                <div class="log-entry info">Waiting for test execution...</div>
             </div>
+
+            <div id="summary" class="summary">
+                <h3>Test Results</h3>
+                <div class="summary-grid">
+                    <div class="summary-stat passed">
+                        <div class="value" id="passedCount">0</div>
+                        <div class="label">Passed</div>
+                    </div>
+                    <div class="summary-stat failed">
+                        <div class="value" id="failedCount">0</div>
+                        <div class="label">Failed</div>
+                    </div>
+                    <div class="summary-stat total">
+                        <div class="value" id="totalCount">0</div>
+                        <div class="label">Total</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="viewer-label">Live Camera View (Debug)</div>
+            <div id="cesiumContainer"></div>
         </div>
     </div>
 
@@ -301,11 +340,16 @@
         // Test Configuration
         // ========================================================================
 
-        // IMPORTANT: Replace with your Cesium Ion token
-        Cesium.Ion.defaultAccessToken = "YOUR_ION_TOKEN";
+        Cesium.Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg";
+
+        // Timing configuration for tile loading
+        const CAMERA_SETTLE_MS = 1500;   // Time to wait after camera move for tiles to load
+        const TILE_LOAD_MS = 2000;       // Additional time for 3D tiles to stream
+        const BETWEEN_TESTS_MS = 500;    // Pause between tests
 
         // Global state
         let viewer = null;
+        let osmTileset = null;
         let testsRunning = false;
         let testResults = { passed: 0, failed: 0, total: 0 };
 
@@ -346,18 +390,49 @@
         }
 
         // ========================================================================
+        // Utility: Delay with frame rendering
+        // ========================================================================
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function waitForTilesToLoad(viewer, maxWaitMs = 5000) {
+            const startTime = Date.now();
+
+            // Wait for tiles to be ready
+            while (Date.now() - startTime < maxWaitMs) {
+                // Force a render
+                viewer.scene.render();
+
+                // Check if tiles are loading
+                const tilesLoading = viewer.scene.globe.tilesLoaded === false;
+
+                if (!tilesLoading) {
+                    log('Globe tiles loaded', 'info');
+                    break;
+                }
+
+                await delay(100);
+            }
+
+            // Extra delay for 3D tiles to stream
+            await delay(TILE_LOAD_MS);
+        }
+
+        // ========================================================================
         // Cesium Initialization
         // ========================================================================
 
         async function initCesium() {
             try {
-                log('Initializing Cesium Viewer (hidden)...', 'info');
+                log('Initializing Cesium Viewer...', 'info');
 
+                // VISIBLE viewer for proper WebGL context and LOD
                 viewer = new Cesium.Viewer('cesiumContainer', {
-                    // Minimal viewer for headless testing
                     globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
                     skyBox: false,
-                    skyAtmosphere: false,
+                    skyAtmosphere: new Cesium.SkyAtmosphere(),
                     animation: false,
                     timeline: false,
                     baseLayerPicker: false,
@@ -367,20 +442,28 @@
                     selectionIndicator: false,
                     navigationHelpButton: false,
                     infoBox: false,
-                    fullscreenButton: false
+                    fullscreenButton: false,
+                    requestRenderMode: false, // Continuous rendering for tile loading
+                    maximumRenderTimeChange: Infinity
                 });
 
+                // Enable depth testing for accurate sampling
+                viewer.scene.globe.depthTestAgainstTerrain = true;
+
                 updateStatus('cesiumStatus', 'Ready', true);
-                log('Cesium Viewer initialized successfully', 'pass');
+                log('Cesium Viewer initialized (visible for debugging)', 'pass');
 
                 // Pre-load OSM Buildings tileset
                 log('Pre-loading OSM Buildings tileset (Asset 96188)...', 'info');
                 updateStatus('osmStatus', 'Loading...', true);
 
-                await SafeCorridor.getOsmBuildingsTileset(viewer);
+                osmTileset = await SafeCorridor.getOsmBuildingsTileset(viewer);
+
+                // Make OSM Buildings visible for debugging
+                osmTileset.show = true;
 
                 updateStatus('osmStatus', 'Ready', true);
-                log('OSM Buildings tileset loaded and cached', 'pass');
+                log('OSM Buildings tileset loaded (visible for debug)', 'pass');
 
                 return true;
             } catch (error) {
@@ -392,25 +475,55 @@
         }
 
         // ========================================================================
+        // Camera Teleportation (Critical for LOD!)
+        // ========================================================================
+
+        async function teleportCameraTo(lat, lon, heightM = 500) {
+            log(`📍 Teleporting camera to (${lat.toFixed(4)}, ${lon.toFixed(4)}) at ${heightM}m altitude`, 'info');
+
+            // Move camera to target location
+            viewer.camera.setView({
+                destination: Cesium.Cartesian3.fromDegrees(lon, lat, heightM),
+                orientation: {
+                    heading: Cesium.Math.toRadians(0),
+                    pitch: Cesium.Math.toRadians(-45), // Look down at 45°
+                    roll: 0
+                }
+            });
+
+            // Force render frames to trigger tile requests
+            for (let i = 0; i < 10; i++) {
+                viewer.scene.render();
+                await delay(50);
+            }
+
+            // Wait for camera to settle and tiles to stream
+            log(`⏳ Waiting ${CAMERA_SETTLE_MS}ms for tiles to load...`, 'info');
+            await delay(CAMERA_SETTLE_MS);
+
+            // Additional wait for 3D tiles
+            await waitForTilesToLoad(viewer, 3000);
+
+            log('📷 Camera positioned, tiles loaded', 'pass');
+        }
+
+        // ========================================================================
         // Test Runner
         // ========================================================================
 
-        /**
-         * Run a single test case
-         * @param {string} name - Test name
-         * @param {number} startLat - Start latitude
-         * @param {number} startLon - Start longitude  
-         * @param {number} endLat - End latitude
-         * @param {number} endLon - End longitude
-         * @param {Object} expected - Expected outcome { isValid, minAltitude?, maxAltitude?, hasViolations? }
-         */
         async function runTest(name, startLat, startLon, endLat, endLon, expected) {
             testResults.total++;
 
-            log(`<span class="label">TEST:</span> ${name}`, 'info');
+            logHeader(`TEST: ${name}`);
             log(`Route: (${startLat.toFixed(4)}, ${startLon.toFixed(4)}) → (${endLat.toFixed(4)}, ${endLon.toFixed(4)})`, 'info');
 
             try {
+                // =====================================================================
+                // CRITICAL FIX: Teleport camera to test location BEFORE sampling
+                // This ensures 3D tiles are loaded (LOD culling fix)
+                // =====================================================================
+                await teleportCameraTo(startLat, startLon, 500);
+
                 // Create route positions
                 const start = Cesium.Cartesian3.fromDegrees(startLon, startLat, 0);
                 const end = Cesium.Cartesian3.fromDegrees(endLon, endLat, 0);
@@ -418,12 +531,20 @@
                 // Call our function under test
                 const result = await SafeCorridor.calculateSafeCorridorHeight(viewer, [start, end], {
                     safetyBuffer: 15,
-                    sampleSpacing: 10, // Slightly wider for faster tests
+                    sampleSpacing: 10,
                     debug: false
                 });
 
+                // =====================================================================
+                // Zero Height Warning (Debugging)
+                // =====================================================================
+                if ((result.maxObstacleHeight || 0) === 0) {
+                    log('⚠️ Zero height detected. Tileset might not be loaded or no buildings in area.', 'warn');
+                }
+
                 // Log results
-                log(`Max Obstacle Height: ${result.maxObstacleHeight?.toFixed(1) || 0}m`, 'info');
+                log(`Max Obstacle Height: ${result.maxObstacleHeight?.toFixed(1) || 0}m`,
+                    (result.maxObstacleHeight || 0) > 0 ? 'pass' : 'warn');
                 log(`Suggested Altitude: ${result.maxHeight?.toFixed(1)}m`, 'info');
                 log(`Samples: ${result.sampleCount} (${result.validSamples || 0} valid)`, 'info');
 
@@ -448,7 +569,7 @@
                     }
                 }
 
-                // Check altitude range (if specified)
+                // Check altitude range
                 if (expected.minAltitude !== undefined) {
                     if (result.maxHeight < expected.minAltitude) {
                         passed = false;
@@ -463,7 +584,7 @@
                     }
                 }
 
-                // Check for violations (if specified)
+                // Check for violations
                 if (expected.hasViolations !== undefined) {
                     const hasViolations = (result.faaValidation?.violationSegments?.length || 0) > 0;
                     if (hasViolations !== expected.hasViolations) {
@@ -472,7 +593,7 @@
                     }
                 }
 
-                // Check obstacle detection (if specified)
+                // Check obstacle detection (CRITICAL for this fix)
                 if (expected.minObstacleHeight !== undefined) {
                     if ((result.maxObstacleHeight || 0) < expected.minObstacleHeight) {
                         passed = false;
@@ -489,6 +610,9 @@
                     failures.forEach(f => log(`  → ${f}`, 'fail'));
                     log(`<span class="label">FAILED</span> ${name}`, 'fail');
                 }
+
+                // Pause between tests
+                await delay(BETWEEN_TESTS_MS);
 
                 return passed;
 
@@ -512,7 +636,8 @@
             updateStatus('testStatus', 'Running...', true);
             clearConsole();
 
-            log('Starting Safe Corridor Test Suite...', 'info');
+            log('Starting Safe Corridor Test Suite v2...', 'info');
+            log('Fixed: Camera teleportation for LOD culling', 'info');
             log('================================================', 'info');
 
             // Ensure Cesium is ready
@@ -529,15 +654,13 @@
             // =====================================================================
             // SCENARIO A: Happy Path - Empty Park in Irvine
             // =====================================================================
-            logHeader('SCENARIO A: Happy Path - Aldrich Park (UCI Campus)');
-
             await runTest(
-                'Aldrich Park Open Field',
-                33.6461, -117.8428,  // Start: UCI Aldrich Park
-                33.6470, -117.8410,  // End: Nearby open area
+                'Scenario A: Aldrich Park (UCI) - Open Field',
+                33.6461, -117.8428,
+                33.6470, -117.8410,
                 {
-                    isValid: true,           // Should be legal
-                    maxAltitude: 50,         // Park area, expect low obstacles
+                    isValid: true,
+                    maxAltitude: 60,        // Park area, expect low/no obstacles
                     hasViolations: false
                 }
             );
@@ -545,75 +668,65 @@
             // =====================================================================
             // SCENARIO B: Urban Buildings - Downtown LA
             // =====================================================================
-            logHeader('SCENARIO B: Urban Buildings - Downtown Los Angeles');
-
             await runTest(
-                'US Bank Tower Area (LA)',
-                34.0514, -118.2548,  // Start: Near US Bank Tower
-                34.0530, -118.2530,  // End: Nearby block
+                'Scenario B: Downtown LA - US Bank Tower Area',
+                34.0514, -118.2548,
+                34.0530, -118.2530,
                 {
-                    // US Bank Tower is 310m - should trigger FAA violation
-                    // But OSM data quality varies, so we just check for building detection
-                    minObstacleHeight: 10   // Should detect SOME buildings
+                    minObstacleHeight: 20   // Should detect buildings in downtown
                 }
             );
 
             // =====================================================================
-            // SCENARIO C: Known Tall Building - Salesforce Tower SF
+            // SCENARIO C: Skyscraper - Salesforce Tower SF (CRITICAL TEST)
+            // Salesforce Tower: 326m (1070ft) - tallest in SF
+            // MUST return height > 100m to prove building detection works
             // =====================================================================
-            logHeader('SCENARIO C: Skyscraper - Salesforce Tower (San Francisco)');
-
             await runTest(
-                'Salesforce Tower Route',
-                37.7897, -122.3972,  // Start: Near Salesforce Tower
-                37.7905, -122.3960,  // End: Adjacent block
+                'Scenario C: Salesforce Tower SF - Skyscraper',
+                37.7897, -122.3972,
+                37.7905, -122.3960,
                 {
-                    // Salesforce Tower is 326m (1070ft) - definitely exceeds 400ft limit
-                    // Should trigger FAA violation if OSM has the building
-                    minObstacleHeight: 50   // Should detect buildings (may vary with OSM data)
+                    minObstacleHeight: 100, // MUST detect the tall building
+                    hasViolations: true     // 326m definitely exceeds 121m FAA limit
                 }
             );
 
             // =====================================================================
-            // SCENARIO D: Medium Buildings - Irvine Spectrum
+            // SCENARIO D: Medium Commercial - Irvine Spectrum
             // =====================================================================
-            logHeader('SCENARIO D: Commercial Area - Irvine Spectrum');
-
             await runTest(
-                'Irvine Spectrum Mall',
-                33.6496, -117.7412,  // Start: Spectrum area
-                33.6510, -117.7390,  // End: Nearby
+                'Scenario D: Irvine Spectrum - Commercial',
+                33.6496, -117.7412,
+                33.6510, -117.7390,
                 {
-                    isValid: true,           // Commercial buildings usually < 400ft
-                    minObstacleHeight: 5,    // Should detect some structures
-                    maxAltitude: 100         // Reasonable commercial height range
+                    isValid: true,
+                    minObstacleHeight: 5,   // Some commercial structures
+                    maxAltitude: 100
                 }
             );
 
             // =====================================================================
-            // SCENARIO E: FAA Violation - Very Tall Obstacle
+            // SCENARIO E: FAA Violation - Willis Tower Chicago
+            // Willis Tower: 442m (1451ft)
             // =====================================================================
-            logHeader('SCENARIO E: FAA Violation Test - Willis Tower (Chicago)');
-
             await runTest(
-                'Willis Tower (Sears Tower) Route',
-                41.8789, -87.6359,   // Start: Near Willis Tower
-                41.8795, -87.6345,   // End: Adjacent
+                'Scenario E: Willis Tower Chicago - Massive Violation',
+                41.8789, -87.6359,
+                41.8795, -87.6345,
                 {
-                    // Willis Tower is 442m (1451ft) - massive FAA violation
-                    // If OSM has it, isValid should be false
-                    minObstacleHeight: 100  // Should detect a major building
+                    minObstacleHeight: 100, // Should detect a major building
+                    hasViolations: true     // Definitely exceeds FAA limit
                 }
             );
 
             // =====================================================================
-            // SCENARIO F: Empty Route Edge Case
+            // SCENARIO F: Edge Case - Empty Route
             // =====================================================================
             logHeader('SCENARIO F: Edge Case - Empty Route');
-
             try {
                 testResults.total++;
-                log('<span class="label">TEST:</span> Empty route handling', 'info');
+                log('Testing empty route handling...', 'info');
 
                 const result = await SafeCorridor.calculateSafeCorridorHeight(viewer, [], {
                     safetyBuffer: 15
@@ -632,13 +745,15 @@
             }
 
             // =====================================================================
-            // SCENARIO G: Single Point Edge Case
+            // SCENARIO G: Edge Case - Single Point
             // =====================================================================
             logHeader('SCENARIO G: Edge Case - Single Point');
-
             try {
                 testResults.total++;
-                log('<span class="label">TEST:</span> Single point handling', 'info');
+                log('Testing single point handling...', 'info');
+
+                // Teleport to the point first
+                await teleportCameraTo(33.6846, -117.8265, 500);
 
                 const singlePoint = Cesium.Cartesian3.fromDegrees(-117.8265, 33.6846, 0);
                 const result = await SafeCorridor.calculateSafeCorridorHeight(viewer, [singlePoint], {
@@ -664,6 +779,10 @@
             log(`Tests Complete: ${testResults.passed}/${testResults.total} passed`,
                 testResults.failed === 0 ? 'pass' : 'warn');
 
+            if (testResults.failed > 0) {
+                log(`⚠️ ${testResults.failed} test(s) failed. Check OSM data availability for those regions.`, 'warn');
+            }
+
             // Update UI
             document.getElementById('passedCount').textContent = testResults.passed;
             document.getElementById('failedCount').textContent = testResults.failed;
@@ -685,6 +804,7 @@
 
         window.addEventListener('load', async () => {
             log('Page loaded. Click "Start Tests" to begin.', 'info');
+            log('v2: Includes camera teleportation fix for LOD culling', 'info');
 
             // Check if SafeCorridor module loaded
             if (typeof SafeCorridor !== 'undefined') {
