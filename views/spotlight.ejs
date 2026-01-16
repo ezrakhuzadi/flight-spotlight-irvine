@@ -942,12 +942,13 @@
 
         let body;
         if (cmdType === 'Hold') {
-          body = { drone_id: selectedDroneId, command_type: { Hold: { duration_secs: 30 } } };
+          // serde uses tag="type" with SCREAMING_SNAKE_CASE
+          body = { drone_id: selectedDroneId, type: 'HOLD', duration_secs: 30 };
         } else if (cmdType === 'Resume') {
-          body = { drone_id: selectedDroneId, command_type: 'Resume' };
+          body = { drone_id: selectedDroneId, type: 'RESUME' };
         } else if (cmdType === 'Land') {
-          // Land = HOLD + altitude change to 0 (simplified for now)
-          body = { drone_id: selectedDroneId, command_type: { Hold: { duration_secs: 9999 } } };
+          // Land = long HOLD (simplified)
+          body = { drone_id: selectedDroneId, type: 'HOLD', duration_secs: 9999 };
         }
 
         try {
