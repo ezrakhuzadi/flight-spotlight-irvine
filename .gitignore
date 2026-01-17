@@ -117,6 +117,9 @@ dist
 
 data/users.json
 data/*.db
+data/*.sqlite
+data/*.sqlite-*
+data/sessions/
 
 
 

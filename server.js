@@ -5,18 +5,24 @@
   const express = require("express");
   const session = require("express-session");
   const crypto = require("crypto");
+  const path = require("path");
+  const fs = require("fs");
+  const bcrypt = require("bcryptjs");
   const axios = require("axios");
   const { socketConnection } = require("./util/io");
   const { initUserStore } = require("./util/user-store");
-  const { requireAuth } = require("./util/auth");
+  const { requireAuth, requireRole } = require("./util/auth");
   require("dotenv").config();
 
   const controlRouter = require("./routes/control");
+  const FileStore = require("session-file-store")(session);
 
   const BLENDER_URL = process.env.BLENDER_URL || process.env.BLENDER_BASE_URL || "http://localhost:8000";
   const ATC_URL = process.env.ATC_SERVER_URL || "http://host.docker.internal:3000";
   const ATC_PROXY_BASE = process.env.ATC_PROXY_BASE || "/api/atc";
   const BLENDER_AUDIENCE = process.env.PASSPORT_AUDIENCE || "testflight.flightblender.com";
+  const PASSWORD_ALGO = "bcrypt";
+  const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
 
   const COMPLIANCE_LIMITS = {
     maxWindMps: 12,
@@ -39,7 +45,28 @@
 
   // Hash password helper
   function hashPassword(password) {
-    return crypto.createHash('sha256').update(password).digest('hex');
+    return bcrypt.hashSync(password, PASSWORD_ROUNDS);
+  }
+
+  function hashLegacyPassword(password) {
+    return crypto.createHash("sha256").update(password).digest("hex");
+  }
+
+  function verifyPassword(user, password) {
+    if (!user || !password) return false;
+    const algo = user.passwordAlgo || "sha256";
+    if (algo === PASSWORD_ALGO) {
+      return bcrypt.compareSync(password, user.passwordHash);
+    }
+    const legacyHash = hashLegacyPassword(password);
+    if (legacyHash !== user.passwordHash) {
+      return false;
+    }
+    const upgraded = hashPassword(password);
+    userStore.updatePassword(user.id, upgraded, PASSWORD_ALGO);
+    user.passwordHash = upgraded;
+    user.passwordAlgo = PASSWORD_ALGO;
+    return true;
   }
 
   function base64UrlEncode(value) {
@@ -125,7 +152,7 @@
   }
 
   const userStore = initUserStore();
-  userStore.ensureDefaults(hashPassword);
+  userStore.ensureDefaults(hashPassword, PASSWORD_ALGO);
 
   let app = express();
 
@@ -141,12 +168,18 @@
   app.use("/assets", express.static("static"));
 
   // Session middleware
+  const sessionPath = process.env.SESSION_STORE_PATH || path.join(__dirname, "data", "sessions");
+  fs.mkdirSync(sessionPath, { recursive: true });
   app.use(session({
-    secret: process.env.SESSION_SECRET || 'atc-drone-dev-secret-change-in-prod',
+    store: new FileStore({
+      path: sessionPath,
+      logFn: () => {}
+    }),
+    secret: process.env.SESSION_SECRET || "atc-drone-dev-secret-change-in-prod",
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
+      secure: process.env.NODE_ENV === "production",
       maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
   }));
@@ -174,9 +207,7 @@
   app.post('/login', (req, res) => {
     const { username, password } = req.body;
     const user = userStore.getUserById(username);
-    const hashedPassword = hashPassword(password);
-
-    if (user && user.passwordHash === hashedPassword) {
+    if (user && verifyPassword(user, password)) {
       req.session.user = {
         id: user.id,
         name: user.name,
@@ -262,6 +293,7 @@
       name: name,
       email: email,
       passwordHash: hashPassword(password),
+      passwordAlgo: PASSWORD_ALGO,
       role: 'operator',
     });
     console.log(`[AUTH] New user registered: ${username}`);
@@ -324,7 +356,7 @@
       return res.redirect('/control/settings?error=user_not_found');
     }
 
-    if (user.passwordHash !== hashPassword(currentPassword)) {
+    if (!verifyPassword(user, currentPassword)) {
       return res.redirect('/control/settings?error=wrong_password');
     }
 
@@ -336,7 +368,7 @@
       return res.redirect('/control/settings?error=password_mismatch');
     }
 
-    userStore.updatePassword(userId, hashPassword(newPassword));
+    userStore.updatePassword(userId, hashPassword(newPassword), PASSWORD_ALGO);
     console.log(`[AUTH] Password changed: ${userId}`);
     res.redirect('/control/settings?updated=password');
   });
@@ -413,7 +445,7 @@
     }
   });
 
-  app.post("/api/rid/demo", requireAuth, async (req, res) => {
+  app.post("/api/rid/demo", requireRole("authority"), async (req, res) => {
     try {
       const { testId, injectionId, payload } = buildDemoRidPayload(req.body?.center, req.body?.subscription_id);
       const token = createDevJwt(["rid.inject_test_data"]);
@@ -465,7 +497,26 @@
   // ========================================
   // ATC-Drone proxy (same-origin for frontend)
   // ========================================
+  function requiresAuthorityForAtc(req) {
+    const method = req.method.toUpperCase();
+    if (method === "GET") return false;
+    const requestPath = req.path.startsWith(ATC_PROXY_BASE)
+      ? req.path.slice(ATC_PROXY_BASE.length)
+      : req.path;
+
+    if (requestPath.startsWith("/v1/geofences/check")) return false;
+    if (requestPath.startsWith("/v1/geofences/check-route")) return false;
+    if (requestPath.startsWith("/v1/geofences") && ["POST", "PUT", "DELETE"].includes(method)) {
+      return true;
+    }
+    if (requestPath.startsWith("/v1/admin")) return true;
+    return false;
+  }
+
   app.all(`${ATC_PROXY_BASE}/*`, requireAuth, async (req, res) => {
+    if (requiresAuthorityForAtc(req) && req.session.user?.role !== "authority") {
+      return res.status(403).json({ message: "insufficient_role" });
+    }
     const targetPath = req.originalUrl.replace(ATC_PROXY_BASE, "");
     const url = `${ATC_URL}${targetPath}`;
     const method = req.method.toUpperCase();

@@ -1,142 +1,247 @@
 const fs = require("fs");
 const path = require("path");
+const Database = require("better-sqlite3");
 
-const DEFAULT_DB_PATH = path.join(__dirname, "..", "data", "users.json");
+const DEFAULT_DB_PATH = path.join(__dirname, "..", "data", "users.sqlite");
+const LEGACY_JSON = "users.json";
 
 function ensureDirectory(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-function readDb(dbPath) {
+function normalizeUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    passwordHash: row.password_hash,
+    passwordAlgo: row.password_algo,
+    role: row.role,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastLoginAt: row.last_login_at
+  };
+}
+
+function migrateLegacyJson(dbPath, db) {
+  const legacyPath = path.join(path.dirname(dbPath), LEGACY_JSON);
+  if (!fs.existsSync(legacyPath)) return;
+  let legacy;
   try {
-    const raw = fs.readFileSync(dbPath, "utf8");
-    return JSON.parse(raw);
+    legacy = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
   } catch (error) {
-    return { users: [] };
+    return;
   }
-}
+  const users = Array.isArray(legacy?.users) ? legacy.users : [];
+  if (users.length === 0) return;
 
-function writeDb(dbPath, data) {
-  const tempPath = `${dbPath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf8");
-  fs.renameSync(tempPath, dbPath);
-}
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO users (
+      id,
+      name,
+      email,
+      password_hash,
+      password_algo,
+      role,
+      created_at,
+      updated_at,
+      last_login_at
+    ) VALUES (
+      @id,
+      @name,
+      @email,
+      @password_hash,
+      @password_algo,
+      @role,
+      @created_at,
+      @updated_at,
+      @last_login_at
+    )
+  `);
 
-function cloneUser(user) {
-  return user ? { ...user } : null;
+  const now = new Date().toISOString();
+  const rows = users
+    .map((user) => ({
+      id: user.id,
+      name: user.name || user.id,
+      email: user.email || `${user.id}@example.com`,
+      password_hash: user.passwordHash || user.password_hash || "",
+      password_algo: user.passwordAlgo || user.password_algo || "sha256",
+      role: user.role || "operator",
+      created_at: user.createdAt || user.created_at || now,
+      updated_at: user.updatedAt || user.updated_at || now,
+      last_login_at: user.lastLoginAt || user.last_login_at || null
+    }))
+    .filter((row) => row.id && row.email && row.password_hash);
+
+  if (rows.length === 0) return;
+  const txn = db.transaction(() => {
+    rows.forEach((row) => insert.run(row));
+  });
+  txn();
 }
 
 function initUserStore(options = {}) {
   const dbPath = options.dbPath || process.env.USER_DB_PATH || DEFAULT_DB_PATH;
   ensureDirectory(dbPath);
-  if (!fs.existsSync(dbPath)) {
-    writeDb(dbPath, { users: [] });
-  }
+
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_algo TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+  `);
+
+  migrateLegacyJson(dbPath, db);
+
+  const statements = {
+    getById: db.prepare("SELECT * FROM users WHERE id = ?"),
+    getByEmail: db.prepare("SELECT * FROM users WHERE email = ?"),
+    insert: db.prepare(`
+      INSERT INTO users (
+        id,
+        name,
+        email,
+        password_hash,
+        password_algo,
+        role,
+        created_at,
+        updated_at,
+        last_login_at
+      ) VALUES (
+        @id,
+        @name,
+        @email,
+        @password_hash,
+        @password_algo,
+        @role,
+        @created_at,
+        @updated_at,
+        @last_login_at
+      )
+    `),
+    updateProfile: db.prepare(`
+      UPDATE users
+      SET name = @name,
+          email = @email,
+          updated_at = @updated_at
+      WHERE id = @id
+    `),
+    updatePassword: db.prepare(`
+      UPDATE users
+      SET password_hash = @password_hash,
+          password_algo = @password_algo,
+          updated_at = @updated_at
+      WHERE id = @id
+    `),
+    deleteUser: db.prepare("DELETE FROM users WHERE id = ?"),
+    touchLogin: db.prepare(`
+      UPDATE users
+      SET last_login_at = @last_login_at,
+          updated_at = @updated_at
+      WHERE id = @id
+    `)
+  };
 
   function getUserById(id) {
-    const data = readDb(dbPath);
-    return cloneUser(data.users.find((user) => user.id === id) || null);
+    return normalizeUser(statements.getById.get(id));
   }
 
   function getUserByEmail(email) {
-    const data = readDb(dbPath);
-    return cloneUser(data.users.find((user) => user.email === email) || null);
+    return normalizeUser(statements.getByEmail.get(email));
   }
 
-  function createUser({ id, name, email, passwordHash, role }) {
-    const data = readDb(dbPath);
+  function createUser({ id, name, email, passwordHash, passwordAlgo, role }) {
     const timestamp = new Date().toISOString();
-    const user = {
+    statements.insert.run({
       id,
       name,
       email,
-      passwordHash,
+      password_hash: passwordHash,
+      password_algo: passwordAlgo,
       role,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      lastLoginAt: null
-    };
-    data.users.push(user);
-    writeDb(dbPath, data);
-    return cloneUser(user);
+      created_at: timestamp,
+      updated_at: timestamp,
+      last_login_at: null
+    });
+    return getUserById(id);
   }
 
   function updateProfile(id, { name, email }) {
-    const data = readDb(dbPath);
-    const user = data.users.find((entry) => entry.id === id);
-    if (!user) {
-      return null;
-    }
-    user.name = name;
-    user.email = email;
-    user.updatedAt = new Date().toISOString();
-    writeDb(dbPath, data);
-    return cloneUser(user);
+    const timestamp = new Date().toISOString();
+    statements.updateProfile.run({
+      id,
+      name,
+      email,
+      updated_at: timestamp
+    });
+    return getUserById(id);
   }
 
-  function updatePassword(id, passwordHash) {
-    const data = readDb(dbPath);
-    const user = data.users.find((entry) => entry.id === id);
-    if (!user) {
-      return;
-    }
-    user.passwordHash = passwordHash;
-    user.updatedAt = new Date().toISOString();
-    writeDb(dbPath, data);
+  function updatePassword(id, passwordHash, passwordAlgo) {
+    const timestamp = new Date().toISOString();
+    statements.updatePassword.run({
+      id,
+      password_hash: passwordHash,
+      password_algo: passwordAlgo,
+      updated_at: timestamp
+    });
   }
 
   function deleteUser(id) {
-    const data = readDb(dbPath);
-    data.users = data.users.filter((user) => user.id !== id);
-    writeDb(dbPath, data);
+    statements.deleteUser.run(id);
   }
 
   function touchLogin(id) {
-    const data = readDb(dbPath);
-    const user = data.users.find((entry) => entry.id === id);
-    if (!user) {
-      return;
-    }
     const timestamp = new Date().toISOString();
-    user.lastLoginAt = timestamp;
-    user.updatedAt = timestamp;
-    writeDb(dbPath, data);
+    statements.touchLogin.run({
+      id,
+      last_login_at: timestamp,
+      updated_at: timestamp
+    });
   }
 
-  function ensureDefaults(hashPassword) {
+  function ensureDefaults(hashPassword, passwordAlgo) {
     const defaults = [
       {
         id: "guest",
         name: "Guest User",
         email: "guest@example.com",
-        passwordHash: hashPassword("guest123"),
+        password: "guest123",
         role: "operator"
       },
       {
         id: "admin",
         name: "Administrator",
         email: "admin@atc-drone.io",
-        passwordHash: hashPassword("admin123"),
+        password: "admin123",
         role: "authority"
       }
     ];
-    const data = readDb(dbPath);
-    let changed = false;
+
     defaults.forEach((user) => {
-      const existing = data.users.find((entry) => entry.id === user.id);
-      if (!existing) {
-        data.users.push({
-          ...user,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          lastLoginAt: null
-        });
-        changed = true;
-      }
+      const existing = getUserById(user.id);
+      if (existing) return;
+      createUser({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        passwordHash: hashPassword(user.password),
+        passwordAlgo,
+        role: user.role
+      });
     });
-    if (changed) {
-      writeDb(dbPath, data);
-    }
   }
 
   return {
