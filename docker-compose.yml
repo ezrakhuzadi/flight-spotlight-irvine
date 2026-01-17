@@ -25,6 +25,8 @@ services:
     command: npm start
     env_file:
       - .env
+    environment:
+      - BLENDER_URL=http://flight-blender:8000
     build: .
     image: openskiessh/flight-spotlight
     container_name: flight-spotlight
@@ -34,7 +36,18 @@ services:
       - redis-spotlight
       - tile38
     volumes:
+      - ./server.js:/usr/src/app/server.js # Mount server.js for live updates
+      - ./util:/usr/src/app/util # Mount util for dependencies
+      - ./routes:/usr/src/app/routes # Mount routes
       - ./views:/usr/src/app/views # Mount local views for live editing
       - ./static:/usr/src/app/static # Mount static assets including 3D models
+      - ./data:/usr/src/app/data # Persist user database
     ports:
       - "5050:5050"
+    networks:
+      - default
+      - interop_ecosystem_network
+
+networks:
+  interop_ecosystem_network:
+    external: true

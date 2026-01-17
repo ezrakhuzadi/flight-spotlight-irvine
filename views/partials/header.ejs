@@ -21,9 +21,14 @@
         <a href="/control/geofences" class="nav-tab <%= activePage === 'geofences' ? 'active' : '' %>">
             <span>Geofences</span>
         </a>
-        <a href="/control/analytics" class="nav-tab <%= activePage === 'analytics' ? 'active' : '' %>">
-            <span>Analytics</span>
+        <a href="/control/remote-id" class="nav-tab <%= activePage === 'remote-id' ? 'active' : '' %>">
+            <span>Remote ID</span>
         </a>
+        <% if (user && user.role === 'authority') { %>
+            <a href="/control/analytics" class="nav-tab <%= activePage === 'analytics' ? 'active' : '' %>">
+                <span>Analytics</span>
+            </a>
+        <% } %>
     </nav>
 
     <!-- Spacer -->

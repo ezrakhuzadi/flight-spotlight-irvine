@@ -7,25 +7,33 @@
 
     const REFRESH_INTERVAL = 3000;
     let selectedDroneId = null;
+    let conformanceByDrone = new Map();
+    let registerInFlight = false;
 
     /**
      * Load and display drone fleet
      */
     async function loadFleet() {
         try {
-            const drones = await API.getDrones();
+            const [drones, conformance] = await Promise.all([
+                API.getDrones(),
+                API.getConformance().catch(() => [])
+            ]);
 
             // Update stats
             const online = drones.filter(d => d.status !== 'Lost').length;
             const flying = drones.filter(d => d.status === 'InFlight' || d.status === 'Rerouting').length;
             const offline = drones.filter(d => d.status === 'Lost').length;
+            const nonconforming = conformance.filter(c => c.status === 'nonconforming').length;
 
             updateElement('fleetOnline', online);
             updateElement('fleetFlying', flying);
+            updateElement('fleetNonconforming', nonconforming);
             updateElement('fleetOffline', offline);
 
             // Update drone list
-            renderDroneList(drones);
+            conformanceByDrone = new Map(conformance.map(entry => [entry.drone_id, entry]));
+            renderDroneList(drones, conformanceByDrone);
 
         } catch (error) {
             console.error('[Fleet] Load failed:', error);
@@ -37,7 +45,7 @@
         if (el) el.textContent = value;
     }
 
-    function renderDroneList(drones) {
+    function renderDroneList(drones, conformanceMap) {
         const container = document.getElementById('droneList');
         if (!container) return;
 
@@ -45,13 +53,21 @@
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-text">No drones registered</div>
-                    <button class="btn btn-primary mt-md">Add Your First Drone</button>
+                    <button class="btn btn-primary mt-md" id="addFirstDrone">Add Your First Drone</button>
                 </div>
             `;
+            const addFirstBtn = document.getElementById('addFirstDrone');
+            if (addFirstBtn) {
+                addFirstBtn.addEventListener('click', registerDrone);
+            }
             return;
         }
 
-        container.innerHTML = drones.map(drone => `
+        container.innerHTML = drones.map(drone => {
+            const conformance = conformanceMap?.get(drone.drone_id);
+            const conformanceStatus = conformance?.status || 'unknown';
+            const conformanceClass = getConformanceClass(conformanceStatus);
+            return `
             <div class="list-item" data-drone-id="${drone.drone_id}">
                 <span class="status-dot ${getStatusClass(drone.status)}"></span>
                 <div class="list-item-content">
@@ -64,6 +80,7 @@
                 </div>
                 <div class="list-item-actions">
                     <span class="status-badge ${getStatusClass(drone.status)}">${drone.status}</span>
+                    <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
                     <button class="btn btn-ghost btn-sm" onclick="Fleet.viewOnMap('${drone.drone_id}')">
                         Map
                     </button>
@@ -72,7 +89,28 @@
                     </button>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
+    }
+
+    async function registerDrone() {
+        if (registerInFlight) return;
+        registerInFlight = true;
+
+        const ownerId = window.APP_USER?.id || null;
+        const provided = window.prompt('Drone ID (optional). Leave blank to auto-generate:');
+        const droneId = provided && provided.trim() ? provided.trim() : null;
+
+        try {
+            const response = await API.registerDrone(droneId, ownerId);
+            const id = response?.drone_id || droneId || 'New drone';
+            alert(`Registered ${id}. Connect your drone SDK to start sending telemetry.`);
+            loadFleet();
+        } catch (error) {
+            alert(`Failed to register drone: ${error.message}`);
+        } finally {
+            registerInFlight = false;
+        }
     }
 
     function showDetails(droneId) {
@@ -87,12 +125,20 @@
         // Fetch and display drone details
         API.getDrones().then(drones => {
             const drone = drones.find(d => d.drone_id === droneId);
+            const conformance = conformanceByDrone.get(droneId);
+            const conformanceStatus = conformance?.status || 'unknown';
+            const conformanceClass = getConformanceClass(conformanceStatus);
             if (drone && contentEl) {
                 contentEl.innerHTML = `
                     <div class="section-subtitle">Status</div>
                     <div class="flex items-center gap-sm mb-md">
                         <span class="status-dot ${getStatusClass(drone.status)}"></span>
                         <span class="status-badge ${getStatusClass(drone.status)}">${drone.status}</span>
+                    </div>
+
+                    <div class="section-subtitle">Conformance</div>
+                    <div class="flex items-center gap-sm mb-md">
+                        <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
                     </div>
                     
                     <div class="section-subtitle">Position</div>
@@ -163,6 +209,17 @@
         }
     }
 
+    function getConformanceClass(status) {
+        switch (status) {
+            case 'conforming':
+                return 'pass';
+            case 'nonconforming':
+                return 'fail';
+            default:
+                return 'warn';
+        }
+    }
+
     // Initialize
     document.addEventListener('DOMContentLoaded', () => {
         loadFleet();
@@ -178,6 +235,11 @@
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', loadFleet);
+        }
+
+        const addBtn = document.getElementById('addDroneBtn');
+        if (addBtn) {
+            addBtn.addEventListener('click', registerDrone);
         }
     });
 

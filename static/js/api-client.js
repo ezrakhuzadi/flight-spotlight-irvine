@@ -7,7 +7,7 @@ const API = (function () {
     'use strict';
 
     // Configuration
-    const ATC_SERVER_URL = 'http://localhost:3000';
+    const ATC_SERVER_URL = window.__ATC_API_BASE__ || 'http://localhost:3000';
 
     // State
     let lastUpdate = null;
@@ -20,6 +20,7 @@ const API = (function () {
 
         try {
             const response = await fetch(url, {
+                credentials: 'same-origin',
                 ...options,
                 headers: {
                     'Content-Type': 'application/json',
@@ -29,6 +30,32 @@ const API = (function () {
 
             if (!response.ok) {
                 throw new Error(`API error: ${response.status}`);
+            }
+
+            lastUpdate = new Date();
+            updateLastUpdateUI();
+
+            return await response.json();
+        } catch (error) {
+            console.error(`[API] ${endpoint} failed:`, error);
+            throw error;
+        }
+    }
+
+    async function requestLocal(endpoint, options = {}) {
+        try {
+            const response = await fetch(endpoint, {
+                credentials: 'same-origin',
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API error: ${response.status} ${errorText}`);
             }
 
             lastUpdate = new Date();
@@ -66,6 +93,13 @@ const API = (function () {
             return request(url);
         },
         getDrone: (id) => request(`/v1/drones/${id}`),
+        registerDrone: (droneId = null, ownerId = null) => request('/v1/drones/register', {
+            method: 'POST',
+            body: JSON.stringify({
+                drone_id: droneId || undefined,
+                owner_id: ownerId || undefined
+            })
+        }),
 
         // Commands
         sendCommand: (droneId, command) => request('/v1/commands', {
@@ -77,7 +111,8 @@ const API = (function () {
             method: 'POST',
             body: JSON.stringify({
                 drone_id: droneId,
-                command_type: { Hold: { duration_secs: duration } }
+                type: 'HOLD',
+                duration_secs: duration
             })
         }),
 
@@ -85,27 +120,70 @@ const API = (function () {
             method: 'POST',
             body: JSON.stringify({
                 drone_id: droneId,
-                command_type: 'Resume'
+                type: 'RESUME'
             })
         }),
 
         // Conflicts
         getConflicts: () => request('/v1/conflicts'),
 
+        // Conformance
+        getConformance: (ownerId = null) => {
+            const url = ownerId ? `/v1/conformance?owner_id=${ownerId}` : '/v1/conformance';
+            return request(url);
+        },
+
         // Geofences
         getGeofences: () => request('/v1/geofences'),
+        createGeofence: (payload) => request('/v1/geofences', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+
+        // Flight Declarations (Flight Blender)
+        getFlightDeclarations: async (params = {}) => {
+            const search = new URLSearchParams(params);
+            const endpoint = `/api/blender/flight-declarations${search.toString() ? `?${search}` : ''}`;
+            const response = await requestLocal(endpoint);
+            return response.results || response;
+        },
+
+        getFlightDeclaration: (id) => {
+            const safeId = encodeURIComponent(id);
+            return requestLocal(`/api/blender/flight-declarations/${safeId}`);
+        },
+
+        createFlightDeclaration: (payload) => requestLocal('/api/blender/flight-declarations', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+
+        // Flight Plans (ATC-Drone)
+        createFlightPlan: (payload) => request('/v1/flights/plan', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }),
+        getFlightPlans: () => request('/v1/flights'),
+
+        // Compliance
+        getComplianceWeather: (lat, lon) => {
+            const params = new URLSearchParams({ lat, lon });
+            return requestLocal(`/api/compliance/weather?${params.toString()}`);
+        },
 
         // Stats (aggregated for dashboard)
         async getStats() {
             try {
-                const [drones, conflicts, geofences] = await Promise.all([
+                const [drones, conflicts, geofences, conformance] = await Promise.all([
                     this.getDrones().catch(() => []),
                     this.getConflicts().catch(() => []),
-                    this.getGeofences().catch(() => [])
+                    this.getGeofences().catch(() => []),
+                    this.getConformance().catch(() => [])
                 ]);
 
                 const online = drones.filter(d => d.status !== 'Lost').length;
                 const flying = drones.filter(d => d.status === 'InFlight' || d.status === 'Rerouting').length;
+                const nonconforming = conformance.filter(c => c.status === 'nonconforming').length;
 
                 return {
                     dronesOnline: online,
@@ -113,8 +191,10 @@ const API = (function () {
                     dronesTotal: drones.length,
                     conflicts: conflicts.length,
                     geofences: geofences.length,
+                    conformanceNoncompliant: nonconforming,
                     drones: drones,
-                    conflictData: conflicts
+                    conflictData: conflicts,
+                    conformanceData: conformance
                 };
             } catch (error) {
                 console.error('[API] getStats failed:', error);

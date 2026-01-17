@@ -1,4 +1,4 @@
-<%- include('layouts/main', { title: 'Mission Detail' , activePage: 'missions' , body: ` <div class="content-area">
+<%- include('layouts/main', { title: 'Mission Detail' , activePage: 'missions' , body: ` <div class="content-area" id="missionDetail" data-mission-id="${missionId}">
     <!-- Page Header -->
     <div class="section-header">
         <div>
@@ -70,6 +70,31 @@
                     <div class="detail-row">
                         <span class="detail-label">Duration</span>
                         <span class="detail-value" id="duration">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conformance -->
+            <div class="card mb-md">
+                <div class="card-header">
+                    <div class="card-title">Conformance</div>
+                </div>
+                <div class="card-body">
+                    <div class="detail-row">
+                        <span class="detail-label">Status</span>
+                        <span class="detail-value" id="conformanceStatus">--</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Code</span>
+                        <span class="detail-value" id="conformanceCode">--</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Description</span>
+                        <span class="detail-value" id="conformanceDescription">--</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Last Update</span>
+                        <span class="detail-value" id="conformanceUpdated">--</span>
                     </div>
                 </div>
             </div>

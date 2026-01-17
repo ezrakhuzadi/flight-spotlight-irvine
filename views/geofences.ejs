@@ -1,3 +1,4 @@
+<% const createButton = (user && user.role === 'authority') ? '<a href="/control/geofences/create" class="btn btn-primary btn-sm">+ Create</a>' : ''; %>
 <%- include('layouts/main', { title: 'Geofences' , activePage: 'geofences' , head: ` <!-- CesiumJS -->
     <script src="/assets/Build/Cesium/Cesium.js"></script>
     <style>
@@ -75,7 +76,7 @@
             <div class="geofence-sidebar-header">
                 <div class="flex items-center justify-between">
                     <div class="card-title">Geofences</div>
-                    <a href="/control/geofences/create" class="btn btn-primary btn-sm">+ Create</a>
+                    ${createButton}
                 </div>
                 <p class="text-muted" style="font-size: 12px; margin-top: 4px;">Manage no-fly zones and restricted areas
                 </p>
@@ -85,11 +86,11 @@
                 <!-- Stats -->
                 <div class="stats-grid mb-md" style="grid-template-columns: repeat(2, 1fr); gap: 8px;">
                     <div class="stat-card" style="padding: 12px;">
-                        <div class="stat-value" style="font-size: 20px;">3</div>
+                        <div class="stat-value" id="geofenceTotal" style="font-size: 20px;">--</div>
                         <div class="stat-label" style="font-size: 10px;">Total</div>
                     </div>
                     <div class="stat-card highlight-red" style="padding: 12px;">
-                        <div class="stat-value" style="font-size: 20px;">1</div>
+                        <div class="stat-value" id="geofenceNoFly" style="font-size: 20px;">--</div>
                         <div class="stat-label" style="font-size: 10px;">No-Fly</div>
                     </div>
                 </div>
@@ -107,29 +108,8 @@
                 <!-- Geofence List -->
                 <div class="section-subtitle">Active Geofences</div>
                 <div id="geofenceList">
-                    <div class="geofence-item" data-type="no_fly" data-id="uci-campus"
-                        onclick="GeofenceControl.focus('uci-campus')">
-                        <span class="status-dot" style="background: var(--accent-red);"></span>
-                        <div class="list-item-content">
-                            <div class="list-item-title">UCI Campus Core</div>
-                            <div class="list-item-subtitle">No-Fly Zone | 0-120m</div>
-                        </div>
-                    </div>
-                    <div class="geofence-item" data-type="restricted" data-id="sna-airport"
-                        onclick="GeofenceControl.focus('sna-airport')">
-                        <span class="status-dot" style="background: var(--accent-yellow);"></span>
-                        <div class="list-item-content">
-                            <div class="list-item-title">John Wayne Airport</div>
-                            <div class="list-item-subtitle">Restricted | 0-400m</div>
-                        </div>
-                    </div>
-                    <div class="geofence-item" data-type="temporary" data-id="construction-a"
-                        onclick="GeofenceControl.focus('construction-a')">
-                        <span class="status-dot" style="background: var(--accent-cyan);"></span>
-                        <div class="list-item-content">
-                            <div class="list-item-title">Construction Zone A</div>
-                            <div class="list-item-subtitle">Temporary | 0-60m</div>
-                        </div>
+                    <div class="empty-state" style="padding: 12px;">
+                        <div class="empty-state-text text-muted">Loading geofences...</div>
                     </div>
                 </div>
             </div>

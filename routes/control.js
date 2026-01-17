@@ -4,6 +4,7 @@
  */
 
 const express = require('express');
+const { requireRole } = require('../util/auth');
 const router = express.Router();
 
 // ============================================
@@ -55,7 +56,7 @@ router.get('/geofences', (req, res) => {
     res.render('geofences', { user: req.session.user });
 });
 
-router.get('/geofences/create', (req, res) => {
+router.get('/geofences/create', requireRole('authority'), (req, res) => {
     res.render('geofence-create', { user: req.session.user });
 });
 
@@ -63,15 +64,23 @@ router.get('/geofences/create', (req, res) => {
 // Conflicts
 // ============================================
 
-router.get('/conflicts', (req, res) => {
+router.get('/conflicts', requireRole('authority'), (req, res) => {
     res.render('conflicts', { user: req.session.user });
+});
+
+// ============================================
+// Remote ID (ASTM F3411)
+// ============================================
+
+router.get('/remote-id', (req, res) => {
+    res.render('remote-id', { user: req.session.user });
 });
 
 // ============================================
 // Analytics
 // ============================================
 
-router.get('/analytics', (req, res) => {
+router.get('/analytics', requireRole('authority'), (req, res) => {
     res.render('analytics', { user: req.session.user });
 });
 

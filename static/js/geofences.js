@@ -17,56 +17,47 @@
     };
 
     // ========================================================================
-    // Sample Geofences
+    // Demo Geofences (seeded when none exist)
     // ========================================================================
 
-    const SAMPLE_GEOFENCES = [
+    const DEMO_GEOFENCES = [
         {
-            id: 'uci-campus',
             name: 'UCI Campus Core',
-            type: 'no_fly',
-            owner: 'guest',
-            lowerAlt: 0,
-            upperAlt: 120,
-            color: Cesium.Color.RED.withAlpha(0.4),
-            outlineColor: Cesium.Color.RED,
-            coordinates: [
-                [-117.8445, 33.6405],
-                [-117.8445, 33.6505],
-                [-117.8345, 33.6505],
-                [-117.8345, 33.6405]
+            geofence_type: 'no_fly_zone',
+            lower_altitude_m: 0,
+            upper_altitude_m: 120,
+            polygon: [
+                [33.6405, -117.8445],
+                [33.6505, -117.8445],
+                [33.6505, -117.8345],
+                [33.6405, -117.8345],
+                [33.6405, -117.8445]
             ]
         },
         {
-            id: 'sna-airport',
             name: 'John Wayne Airport (SNA)',
-            type: 'restricted',
-            owner: 'guest',
-            lowerAlt: 0,
-            upperAlt: 400,
-            color: Cesium.Color.YELLOW.withAlpha(0.3),
-            outlineColor: Cesium.Color.YELLOW,
-            coordinates: [
-                [-117.8750, 33.6700],
-                [-117.8750, 33.6850],
-                [-117.8550, 33.6850],
-                [-117.8550, 33.6700]
+            geofence_type: 'restricted_area',
+            lower_altitude_m: 0,
+            upper_altitude_m: 400,
+            polygon: [
+                [33.6700, -117.8750],
+                [33.6850, -117.8750],
+                [33.6850, -117.8550],
+                [33.6700, -117.8550],
+                [33.6700, -117.8750]
             ]
         },
         {
-            id: 'construction-a',
             name: 'Construction Zone A',
-            type: 'temporary',
-            owner: 'guest',
-            lowerAlt: 0,
-            upperAlt: 60,
-            color: Cesium.Color.CYAN.withAlpha(0.3),
-            outlineColor: Cesium.Color.CYAN,
-            coordinates: [
-                [-117.8300, 33.6430],
-                [-117.8300, 33.6460],
-                [-117.8250, 33.6460],
-                [-117.8250, 33.6430]
+            geofence_type: 'temporary_restriction',
+            lower_altitude_m: 0,
+            upper_altitude_m: 60,
+            polygon: [
+                [33.6430, -117.8300],
+                [33.6460, -117.8300],
+                [33.6460, -117.8250],
+                [33.6430, -117.8250],
+                [33.6430, -117.8300]
             ]
         }
     ];
@@ -76,6 +67,9 @@
     // ========================================================================
 
     let viewer = null;
+    let geofences = [];
+    let seedAttempted = false;
+    let activeFilter = 'all';
     const geofenceEntities = new Map();
 
     // ========================================================================
@@ -125,46 +119,126 @@
             console.error('[Geofences] Failed to load 3D tiles:', e);
         }
 
-        // Add geofences
-        addGeofences();
-
         // Set initial view
         resetView();
 
         console.log('[Geofences] Viewer initialized');
     }
 
-    function addGeofences() {
-        SAMPLE_GEOFENCES.forEach(gf => {
-            const positions = [];
-            gf.coordinates.forEach(coord => {
-                positions.push(coord[0], coord[1]);
-            });
+    async function loadGeofences() {
+        try {
+            const data = await API.getGeofences();
+            if (Array.isArray(data) && data.length) {
+                geofences = data.filter((gf) => gf.active !== false);
+                renderGeofences();
+                return;
+            }
 
+            if (!seedAttempted) {
+                seedAttempted = true;
+                await seedDemoGeofences();
+                return loadGeofences();
+            }
+        } catch (error) {
+            console.error('[Geofences] Failed to load geofences:', error);
+        }
+
+        geofences = DEMO_GEOFENCES.map((gf, index) => ({
+            ...gf,
+            id: `demo-${index + 1}`,
+            active: true
+        }));
+        renderGeofences();
+    }
+
+    async function seedDemoGeofences() {
+        if (!Array.isArray(DEMO_GEOFENCES) || !DEMO_GEOFENCES.length) {
+            return;
+        }
+
+        try {
+            await Promise.all(DEMO_GEOFENCES.map((geofence) => API.createGeofence(geofence)));
+        } catch (error) {
+            console.error('[Geofences] Failed to seed demo geofences:', error);
+        }
+    }
+
+    function renderGeofences() {
+        clearGeofenceEntities();
+        updateStats();
+        renderGeofenceList();
+
+        geofences.forEach((gf) => {
+            const positions = gf.polygon.map(([lat, lon]) => [lon, lat]).flat();
+            const colors = getGeofenceColors(gf.geofence_type);
             const entity = viewer.entities.add({
                 id: gf.id,
                 name: gf.name,
                 polygon: {
                     hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
-                    height: gf.lowerAlt,
-                    extrudedHeight: gf.upperAlt,
-                    material: gf.color,
+                    height: gf.lower_altitude_m || 0,
+                    extrudedHeight: gf.upper_altitude_m || 0,
+                    material: colors.fill,
                     outline: true,
-                    outlineColor: gf.outlineColor,
+                    outlineColor: colors.outline,
                     outlineWidth: 2
                 },
                 description: `
                     <table class="cesium-infoBox-defaultTable">
-                        <tr><td>Type:</td><td>${gf.type.replace('_', ' ').toUpperCase()}</td></tr>
-                        <tr><td>Altitude:</td><td>${gf.lowerAlt}m - ${gf.upperAlt}m AGL</td></tr>
-                        <tr><td>Owner:</td><td>${gf.owner}</td></tr>
+                        <tr><td>Type:</td><td>${formatTypeLabel(gf.geofence_type)}</td></tr>
+                        <tr><td>Altitude:</td><td>${gf.lower_altitude_m || 0}m - ${gf.upper_altitude_m || 0}m AGL</td></tr>
                     </table>
                 `
             });
 
-            geofenceEntities.set(gf.id, { entity, data: gf });
-            console.log('[Geofences] Added:', gf.name);
+            geofenceEntities.set(gf.id, { entity, data: gf, filterType: mapFilterType(gf.geofence_type) });
         });
+
+        applyFilter(activeFilter);
+    }
+
+    function clearGeofenceEntities() {
+        geofenceEntities.forEach((entry) => viewer.entities.remove(entry.entity));
+        geofenceEntities.clear();
+    }
+
+    function updateStats() {
+        const totalEl = document.getElementById('geofenceTotal');
+        const noFlyEl = document.getElementById('geofenceNoFly');
+        const total = geofences.length;
+        const noFly = geofences.filter((gf) => gf.geofence_type === 'no_fly_zone').length;
+        if (totalEl) totalEl.textContent = total.toString();
+        if (noFlyEl) noFlyEl.textContent = noFly.toString();
+    }
+
+    function renderGeofenceList() {
+        const container = document.getElementById('geofenceList');
+        if (!container) return;
+
+        if (!geofences.length) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding: 12px;">
+                    <div class="empty-state-text text-muted">No geofences available</div>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = geofences.map((gf) => {
+            const filterType = mapFilterType(gf.geofence_type);
+            const colors = getGeofenceColors(gf.geofence_type);
+            const label = formatTypeLabel(gf.geofence_type);
+            return `
+                <div class="geofence-item" data-type="${filterType}" data-id="${gf.id}"
+                    onclick="GeofenceControl.focus('${gf.id}')">
+                    <span class="status-dot" style="background: ${colors.dot};"></span>
+                    <div class="list-item-content">
+                        <div class="list-item-title">${gf.name}</div>
+                        <div class="list-item-subtitle">${label} | ${gf.lower_altitude_m || 0}-${gf.upper_altitude_m || 0}m</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     function resetView() {
@@ -200,21 +274,67 @@
         }
     }
 
-    function filterGeofences(type) {
-        // Filter list
-        document.querySelectorAll('.geofence-item').forEach(el => {
+    function mapFilterType(type) {
+        switch (type) {
+            case 'no_fly_zone':
+                return 'no_fly';
+            case 'restricted_area':
+                return 'restricted';
+            case 'temporary_restriction':
+                return 'temporary';
+            default:
+                return 'all';
+        }
+    }
+
+    function formatTypeLabel(type) {
+        switch (type) {
+            case 'no_fly_zone':
+                return 'No-Fly Zone';
+            case 'restricted_area':
+                return 'Restricted';
+            case 'temporary_restriction':
+                return 'Temporary';
+            case 'advisory':
+                return 'Advisory';
+            default:
+                return 'Geofence';
+        }
+    }
+
+    function getGeofenceColors(type) {
+        switch (type) {
+            case 'no_fly_zone':
+                return { fill: Cesium.Color.RED.withAlpha(0.2), outline: Cesium.Color.RED, dot: 'var(--accent-red)' };
+            case 'restricted_area':
+                return { fill: Cesium.Color.YELLOW.withAlpha(0.2), outline: Cesium.Color.YELLOW, dot: 'var(--accent-yellow)' };
+            case 'temporary_restriction':
+                return { fill: Cesium.Color.CYAN.withAlpha(0.2), outline: Cesium.Color.CYAN, dot: 'var(--accent-cyan)' };
+            case 'advisory':
+                return { fill: Cesium.Color.BLUE.withAlpha(0.15), outline: Cesium.Color.BLUE, dot: 'var(--accent-blue)' };
+            default:
+                return { fill: Cesium.Color.BLUE.withAlpha(0.15), outline: Cesium.Color.BLUE, dot: 'var(--accent-blue)' };
+        }
+    }
+
+    function applyFilter(type) {
+        activeFilter = type;
+
+        document.querySelectorAll('.geofence-item').forEach((el) => {
             el.style.display = (type === 'all' || el.dataset.type === type) ? 'flex' : 'none';
         });
 
-        // Update buttons
-        document.querySelectorAll('[data-filter]').forEach(btn => {
+        document.querySelectorAll('[data-filter]').forEach((btn) => {
             btn.classList.toggle('active', btn.dataset.filter === type);
         });
 
-        // Update map visibility
-        geofenceEntities.forEach((gf, id) => {
-            gf.entity.show = (type === 'all' || gf.data.type === type);
+        geofenceEntities.forEach((entry) => {
+            entry.entity.show = (type === 'all' || entry.filterType === type);
         });
+    }
+
+    function filterGeofences(type) {
+        applyFilter(type);
     }
 
     // ========================================================================
@@ -232,7 +352,7 @@
     // ========================================================================
 
     document.addEventListener('DOMContentLoaded', () => {
-        initViewer();
+        initViewer().then(loadGeofences);
     });
 
 })();

@@ -453,6 +453,21 @@ body {
     color: var(--accent-purple);
 }
 
+.status-badge.pass {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-green);
+}
+
+.status-badge.warn {
+    background: rgba(251, 191, 36, 0.15);
+    color: var(--accent-yellow);
+}
+
+.status-badge.fail {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-red);
+}
+
 /* ============================================
    Lists
    ============================================ */
@@ -901,6 +916,47 @@ textarea.form-input {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: var(--spacing-md);
+}
+
+/* ============================================
+   Compliance Checklist
+   ============================================ */
+.stacked-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.compliance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.compliance-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    background: var(--bg-secondary);
+}
+
+.compliance-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-sm);
+}
+
+.compliance-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: var(--spacing-xs);
+}
+
+.compliance-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
 }
 
 /* ============================================

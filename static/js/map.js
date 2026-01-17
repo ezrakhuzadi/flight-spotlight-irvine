@@ -11,7 +11,7 @@
     // ========================================================================
 
     const CONFIG = {
-        ATC_SERVER_URL: 'http://localhost:3000',
+        ATC_SERVER_URL: window.__ATC_API_BASE__ || 'http://localhost:3000',
         CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
         GOOGLE_3D_TILES_ASSET_ID: 2275207,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2000 },
@@ -22,7 +22,8 @@
             conflicts: 2000,
             flightPlans: 5000,
             geofences: 10000,
-            health: 5000
+            health: 5000,
+            conformance: 8000
         }
     };
 
@@ -37,6 +38,7 @@
     const droneTrails = new Map();    // droneId -> [Cartesian3]
     const droneData = new Map();      // droneId -> {lat, lon, alt, speed, heading}
     const headingArrows = new Map();  // droneId -> arrow entity
+    const conformanceStatuses = new Map(); // droneId -> status payload
 
     // Conflicts
     const conflictEntities = new Map();  // conflictId -> entity
@@ -242,6 +244,10 @@
         // Geofences
         fetchGeofences();
         setInterval(fetchGeofences, CONFIG.REFRESH_INTERVALS.geofences);
+
+        // Conformance
+        fetchConformance();
+        setInterval(fetchConformance, CONFIG.REFRESH_INTERVALS.conformance);
     }
 
     // ========================================================================
@@ -251,7 +257,9 @@
     async function fetchDrones() {
         try {
             console.log('[Map] Fetching drones from:', CONFIG.ATC_SERVER_URL + '/v1/drones');
-            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/drones');
+            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/drones', {
+                credentials: 'same-origin'
+            });
             if (!response.ok) {
                 console.error('[Map] Drone fetch failed:', response.status, response.statusText);
                 return;
@@ -302,6 +310,26 @@
 
         } catch (e) {
             console.error('[Map] Drone fetch error:', e.message);
+        }
+    }
+
+    async function fetchConformance() {
+        try {
+            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/conformance', {
+                credentials: 'same-origin'
+            });
+            if (!response.ok) {
+                console.error('[Map] Conformance fetch failed:', response.status, response.statusText);
+                return;
+            }
+
+            const statuses = await response.json();
+            conformanceStatuses.clear();
+            statuses.forEach((entry) => {
+                conformanceStatuses.set(entry.drone_id, entry);
+            });
+        } catch (e) {
+            console.error('[Map] Conformance fetch error:', e.message);
         }
     }
 
@@ -437,7 +465,9 @@
 
     async function fetchConflicts() {
         try {
-            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/conflicts');
+            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/conflicts', {
+                credentials: 'same-origin'
+            });
             if (!response.ok) return;
 
             const conflicts = await response.json();
@@ -533,7 +563,9 @@
 
     async function fetchGeofences() {
         try {
-            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/geofences');
+            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/geofences', {
+                credentials: 'same-origin'
+            });
             if (!response.ok) return;
 
             const geofences = await response.json();
@@ -607,7 +639,9 @@
 
     async function fetchFlightPlans() {
         try {
-            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/flights');
+            const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/flights', {
+                credentials: 'same-origin'
+            });
             if (!response.ok) return;
 
             const plans = await response.json();
@@ -637,16 +671,24 @@
             return;
         }
 
-        container.innerHTML = drones.map(drone => `
-            <div class="drone-track-item ${selectedDroneId === drone.drone_id ? 'selected' : ''}" 
-                 onclick="MapControl.selectDrone('${drone.drone_id}')">
-                <span class="status-dot ${getStatusClass(drone.status)}"></span>
-                <div class="list-item-content">
-                    <div class="list-item-title" style="font-size: 13px;">${drone.drone_id}</div>
-                    <div class="list-item-subtitle" style="font-size: 11px;">${drone.altitude_m.toFixed(0)}m | ${drone.speed_mps.toFixed(1)} m/s</div>
+        container.innerHTML = drones.map(drone => {
+            const conformance = conformanceStatuses.get(drone.drone_id);
+            const conformanceStatus = conformance?.status || 'unknown';
+            const conformanceClass = getConformanceClass(conformanceStatus);
+            return `
+                <div class="drone-track-item ${selectedDroneId === drone.drone_id ? 'selected' : ''}" 
+                     onclick="MapControl.selectDrone('${drone.drone_id}')">
+                    <span class="status-dot ${getStatusClass(drone.status)}"></span>
+                    <div class="list-item-content">
+                        <div class="list-item-title" style="font-size: 13px;">${drone.drone_id}</div>
+                        <div class="list-item-subtitle" style="font-size: 11px;">${drone.altitude_m.toFixed(0)}m | ${drone.speed_mps.toFixed(1)} m/s</div>
+                        <div class="list-item-subtitle" style="font-size: 11px;">
+                            <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     function updateConflictsList(conflicts) {
@@ -689,6 +731,9 @@
         const altEl = document.getElementById('selectedDroneAlt');
         const speedEl = document.getElementById('selectedDroneSpeed');
         const statusEl = document.getElementById('selectedDroneStatus');
+        const conformanceEl = document.getElementById('selectedDroneConformance');
+        const conformanceCodeEl = document.getElementById('selectedDroneConformanceCode');
+        const conformanceNoteEl = document.getElementById('selectedDroneConformanceNote');
 
         if (nameEl) nameEl.textContent = selectedDroneId || '--';
         if (latEl) latEl.textContent = data.lat?.toFixed(6) || '--';
@@ -696,6 +741,16 @@
         if (altEl) altEl.textContent = data.alt?.toFixed(1) || '--';
         if (speedEl) speedEl.textContent = data.speed?.toFixed(1) || '--';
         if (statusEl) statusEl.className = 'status-dot flying';
+        const conformance = conformanceStatuses.get(selectedDroneId);
+        if (conformanceEl) {
+            conformanceEl.textContent = conformance?.status || 'unknown';
+        }
+        if (conformanceCodeEl) {
+            conformanceCodeEl.textContent = conformance?.record?.conformance_state_code || '--';
+        }
+        if (conformanceNoteEl) {
+            conformanceNoteEl.textContent = conformance?.record?.description || '--';
+        }
     }
 
     function getStatusClass(status) {
@@ -710,6 +765,17 @@
                 return 'offline';
             default:
                 return 'online';
+        }
+    }
+
+    function getConformanceClass(status) {
+        switch (status) {
+            case 'conforming':
+                return 'pass';
+            case 'nonconforming':
+                return 'fail';
+            default:
+                return 'warn';
         }
     }
 
@@ -793,15 +859,7 @@
         if (!selectedDroneId) return;
 
         try {
-            await fetch(CONFIG.ATC_SERVER_URL + '/v1/commands', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    drone_id: selectedDroneId,
-                    type: 'HOLD',
-                    duration_secs: 30
-                })
-            });
+            await API.holdDrone(selectedDroneId, 30);
             console.log(`[Map] HOLD sent to ${selectedDroneId}`);
         } catch (e) {
             console.error('[Map] Hold command failed:', e);
@@ -812,14 +870,7 @@
         if (!selectedDroneId) return;
 
         try {
-            await fetch(CONFIG.ATC_SERVER_URL + '/v1/commands', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    drone_id: selectedDroneId,
-                    type: 'RESUME'
-                })
-            });
+            await API.resumeDrone(selectedDroneId);
             console.log(`[Map] RESUME sent to ${selectedDroneId}`);
         } catch (e) {
             console.error('[Map] Resume command failed:', e);

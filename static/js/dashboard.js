@@ -20,10 +20,11 @@
             updateElement('statDronesOnline', stats.dronesOnline);
             updateElement('statActiveMissions', stats.dronesFlying);
             updateElement('statConflicts', stats.conflicts);
+            updateElement('statNonconforming', stats.conformanceNoncompliant ?? 0);
             updateElement('statGeofences', stats.geofences);
 
             // Update fleet overview
-            updateFleetOverview(stats.drones);
+            updateFleetOverview(stats.drones, stats.conformanceData);
 
             // Update activity feed
             updateActivityFeed(stats);
@@ -41,7 +42,7 @@
         if (el) el.textContent = value;
     }
 
-    function updateFleetOverview(drones) {
+    function updateFleetOverview(drones, conformance) {
         const container = document.getElementById('fleetOverview');
         if (!container) return;
 
@@ -54,18 +55,25 @@
             return;
         }
 
-        container.innerHTML = drones.slice(0, 5).map(drone => `
-            <div class="list-item">
-                <span class="status-dot ${getStatusClass(drone.status)}"></span>
-                <div class="list-item-content">
-                    <div class="list-item-title">${drone.drone_id}</div>
-                    <div class="list-item-subtitle">
-                        ${drone.lat.toFixed(5)}, ${drone.lon.toFixed(5)} @ ${drone.altitude_m.toFixed(0)}m
+        const conformanceMap = new Map((conformance || []).map(entry => [entry.drone_id, entry]));
+
+        container.innerHTML = drones.slice(0, 5).map(drone => {
+            const conformanceStatus = conformanceMap.get(drone.drone_id)?.status || 'unknown';
+            const conformanceClass = getConformanceClass(conformanceStatus);
+            return `
+                <div class="list-item">
+                    <span class="status-dot ${getStatusClass(drone.status)}"></span>
+                    <div class="list-item-content">
+                        <div class="list-item-title">${drone.drone_id}</div>
+                        <div class="list-item-subtitle">
+                            ${drone.lat.toFixed(5)}, ${drone.lon.toFixed(5)} @ ${drone.altitude_m.toFixed(0)}m
+                        </div>
                     </div>
+                    <span class="status-badge ${getStatusClass(drone.status)}">${drone.status}</span>
+                    <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
                 </div>
-                <span class="status-badge ${getStatusClass(drone.status)}">${drone.status}</span>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     function updateActivityFeed(stats) {
@@ -87,6 +95,13 @@
         if (stats.conflicts > 0) {
             activities.push({
                 text: `${stats.conflicts} conflict(s) detected`,
+                time: 'now'
+            });
+        }
+
+        if ((stats.conformanceNoncompliant ?? 0) > 0) {
+            activities.push({
+                text: `${stats.conformanceNoncompliant} nonconforming flight(s)`,
                 time: 'now'
             });
         }
@@ -114,7 +129,7 @@
         const container = document.getElementById('alertsPanel');
         if (!container) return;
 
-        if (stats.conflicts === 0) {
+        if (stats.conflicts === 0 && (stats.conformanceNoncompliant ?? 0) === 0) {
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-text">No active alerts</div>
@@ -123,15 +138,32 @@
             return;
         }
 
-        container.innerHTML = `
-            <div class="list-item" style="background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red);">
-                <div class="list-item-content">
-                    <div class="list-item-title text-danger">${stats.conflicts} Active Conflict(s)</div>
-                    <div class="list-item-subtitle">Automatic resolution in progress</div>
+        const alerts = [];
+        if (stats.conflicts > 0) {
+            alerts.push(`
+                <div class="list-item" style="background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red);">
+                    <div class="list-item-content">
+                        <div class="list-item-title text-danger">${stats.conflicts} Active Conflict(s)</div>
+                        <div class="list-item-subtitle">Automatic resolution in progress</div>
+                    </div>
+                    <a href="/control/map" class="btn btn-danger btn-sm">View Map</a>
                 </div>
-                <a href="/control/map" class="btn btn-danger btn-sm">View Map</a>
-            </div>
-        `;
+            `);
+        }
+
+        if ((stats.conformanceNoncompliant ?? 0) > 0) {
+            alerts.push(`
+                <div class="list-item" style="background: rgba(251, 191, 36, 0.1); border-color: var(--accent-yellow);">
+                    <div class="list-item-content">
+                        <div class="list-item-title">${stats.conformanceNoncompliant} Nonconforming Flight(s)</div>
+                        <div class="list-item-subtitle">Review conformance status</div>
+                    </div>
+                    <a href="/control/fleet" class="btn btn-warning btn-sm">View Fleet</a>
+                </div>
+            `);
+        }
+
+        container.innerHTML = alerts.join('');
     }
 
     function getStatusClass(status) {
@@ -146,6 +178,17 @@
                 return 'offline';
             default:
                 return 'online';
+        }
+    }
+
+    function getConformanceClass(status) {
+        switch (status) {
+            case 'conforming':
+                return 'pass';
+            case 'nonconforming':
+                return 'fail';
+            default:
+                return 'warn';
         }
     }
 
