@@ -256,22 +256,45 @@
      * @param {number} lon - Longitude
      * @param {number} alt - Altitude in meters (above ellipsoid)
      */
+    /**
+     * Get waypoint label that matches the sidebar UI:
+     * - Index 1: "A (Start)"
+     * - Intermediate: "1", "2", "3"... (numbered stops)
+     * - Last: "B" (destination)
+     */
+    function getWaypointLabel(index, totalWaypoints) {
+        if (index === 1) {
+            return 'A (Start)';
+        } else if (index === totalWaypoints) {
+            return 'B';
+        } else {
+            // Intermediate stops are numbered starting from 1
+            return String(index - 1);
+        }
+    }
+
     function addWaypoint(lat, lon, alt) {
         const waypointIndex = waypoints.length + 1;
 
         waypoints.push({ lat, lon, alt, index: waypointIndex });
+
+        // Generate label that matches sidebar: A (Start), 1, 2, ... B
+        const labelText = getWaypointLabel(waypointIndex, waypointIndex);
+
+        // Determine marker color: green for start, cyan for others
+        const isStart = waypointIndex === 1;
 
         // Add visual marker
         const entity = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
             point: {
                 pixelSize: 14,
-                color: waypointIndex === 1 ? Cesium.Color.LIME : Cesium.Color.CYAN,
+                color: isStart ? Cesium.Color.LIME : Cesium.Color.CYAN,
                 outlineColor: Cesium.Color.WHITE,
                 outlineWidth: 2
             },
             label: {
-                text: waypointIndex === 1 ? 'A (Start)' : `WP${waypointIndex}`,
+                text: labelText,
                 font: '14px Inter, sans-serif',
                 fillColor: Cesium.Color.WHITE,
                 showBackground: true,
@@ -284,6 +307,10 @@
 
         waypointEntities.push(entity);
 
+        // Update ALL waypoint labels to reflect the new total count
+        // (previous "B" should become a number, new waypoint becomes "B")
+        updateWaypointLabels();
+
         // Update route visualization
         updateRouteVisualization();
 
@@ -293,6 +320,21 @@
         }
 
         console.log(`[Planner] Waypoint ${waypointIndex} added: (${lat.toFixed(5)}, ${lon.toFixed(5)}) at ${alt.toFixed(1)}m`);
+    }
+
+    /**
+     * Update all waypoint labels to match the sidebar pattern:
+     * A (Start), 1, 2, 3..., B
+     * This is called after adding/removing waypoints.
+     */
+    function updateWaypointLabels() {
+        const total = waypointEntities.length;
+        waypointEntities.forEach((entity, idx) => {
+            const labelText = getWaypointLabel(idx + 1, total);
+            if (entity.label) {
+                entity.label.text = labelText;
+            }
+        });
     }
 
     /**
@@ -316,6 +358,27 @@
 
         addWaypoint(lat, lon, resolvedAlt);
         return { lat, lon, alt: resolvedAlt };
+    }
+
+    async function getTerrainHeight(lat, lon) {
+        if (!viewer) {
+            return 0;
+        }
+        const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+        try {
+            const sampled = await Cesium.sampleTerrainMostDetailed(
+                viewer.terrainProvider,
+                [carto]
+            );
+            const height = sampled && sampled[0] ? sampled[0].height : null;
+            if (Number.isFinite(height)) {
+                return height;
+            }
+        } catch (error) {
+            console.warn('[Planner] Terrain sample failed:', error);
+        }
+        const fallback = viewer.scene.globe.getHeight(carto);
+        return Number.isFinite(fallback) ? fallback : 0;
     }
 
     /**
@@ -492,423 +555,6 @@
     // Height Sampling (Ported from safe-corridor.js)
     // ============================================================================
 
-    /**
-     * Get terrain height at a location
-     */
-    async function getTerrainHeight(lat, lon) {
-        const positions = [Cesium.Cartographic.fromDegrees(lon, lat)];
-        const results = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, positions);
-        return results[0].height || 0;
-    }
-
-    /**
-     * Generate a sampling grid along the route (5 lanes wide)
-     * @param {Array} waypoints - User waypoints
-     * @param {Number} spacingMeters - Spacing between steps
-     * @returns {Object} Grid structure { lanes: [[{lat,lon,alt}, ...], ...], centerLine: [...] }
-     */
-    function buildLaneOffsets(radiusMeters, spacingMeters) {
-        const steps = Math.max(1, Math.floor(radiusMeters / spacingMeters));
-        const offsets = [];
-        for (let i = -steps; i <= steps; i++) {
-            offsets.push(i * spacingMeters);
-        }
-        if (!offsets.includes(0)) offsets.push(0);
-        return offsets.sort((a, b) => a - b);
-    }
-
-    function resolveLaneOffsets(radiusMeters) {
-        return buildLaneOffsets(radiusMeters, CONFIG.DEFAULT_LANE_SPACING_M);
-    }
-
-    function resolveGridSpacing(waypoints) {
-        if (!Array.isArray(waypoints) || waypoints.length < 2) {
-            return CONFIG.DEFAULT_SAMPLE_SPACING_M;
-        }
-        let distanceMeters = 0;
-        for (let i = 1; i < waypoints.length; i++) {
-            distanceMeters += calculateDistance(waypoints[i - 1], waypoints[i]);
-        }
-        if (distanceMeters > 8000) return 10;
-        if (distanceMeters > 4000) return 7.5;
-        if (distanceMeters > 2000) return 6;
-        return CONFIG.DEFAULT_SAMPLE_SPACING_M;
-    }
-
-    function generateGridSamples(waypoints, spacingMeters, laneOffsets = resolveLaneOffsets(CONFIG.DEFAULT_LANE_RADIUS_M)) {
-        if (waypoints.length < 2) return null;
-
-        const lanes = laneOffsets.map(() => []);
-        const centerLine = [];
-        const waypointIndices = [0]; // Track which grid steps are user waypoints (first is always 0)
-        let totalSteps = 0;
-
-        for (let i = 0; i < waypoints.length - 1; i++) {
-            const start = waypoints[i];
-            const end = waypoints[i + 1];
-
-            const startCarto = Cesium.Cartographic.fromDegrees(start.lon, start.lat);
-            const endCarto = Cesium.Cartographic.fromDegrees(end.lon, end.lat);
-            const geodesic = new Cesium.EllipsoidGeodesic(startCarto, endCarto);
-            const distance = geodesic.surfaceDistance;
-            const heading = geodesic.startHeading;
-
-            // Compute perpendicular heading for lateral offsets (Right +90 deg)
-            const rightHeading = heading + (Math.PI / 2);
-
-            // Interpolate points along the segment
-            const numSteps = Math.ceil(distance / spacingMeters);
-
-            // For each step along the segment
-            for (let j = 0; j <= numSteps; j++) {
-                // Skip the last point of segment if it's the start of next (except for very last leg)
-                if (j === numSteps && i < waypoints.length - 2) continue;
-
-                const fraction = j / numSteps;
-                const centerPoint = geodesic.interpolateUsingSurfaceDistance(fraction * distance);
-                const alt = start.alt + fraction * (end.alt - start.alt);
-
-                // Convert center to Cartesian for offset calculation
-                const centerCart = Cesium.Cartographic.toCartesian(centerPoint);
-
-                // Store center point (matches original linear interpolation)
-                centerLine.push({
-                    lat: Cesium.Math.toDegrees(centerPoint.latitude),
-                    lon: Cesium.Math.toDegrees(centerPoint.longitude),
-                    alt: alt
-                });
-
-                // Generate lateral offset points for each lane
-                laneOffsets.forEach((offset, laneIdx) => {
-                    if (offset === 0) {
-                        lanes[laneIdx].push({
-                            lat: Cesium.Math.toDegrees(centerPoint.latitude),
-                            lon: Cesium.Math.toDegrees(centerPoint.longitude),
-                            alt: alt
-                        });
-                    } else {
-                        // Robust method:
-                        // 1. Get East-North-Up frame at center point
-                        // 2. Rotate Heading to get Forward vector
-                        // 3. Rotate +90 for Right vector
-                        // 4. Position = Center + Right * offset
-
-                        const transform = Cesium.Transforms.eastNorthUpToFixedFrame(centerCart);
-                        const matrix = Cesium.Matrix4.getMatrix3(transform, new Cesium.Matrix3());
-
-                        // Heading vector in local ENU: [sin(heading), cos(heading), 0]
-                        const enuRight = new Cesium.Cartesian3(
-                            Math.sin(rightHeading),
-                            Math.cos(rightHeading),
-                            0
-                        );
-
-                        // Scale by offset
-                        const offsetVec = Cesium.Cartesian3.multiplyByScalar(enuRight, offset, new Cesium.Cartesian3());
-
-                        // Rotate to world coordinates
-                        const worldOffset = Cesium.Matrix3.multiplyByVector(matrix, offsetVec, new Cesium.Cartesian3());
-                        const finalPos = Cesium.Cartesian3.add(centerCart, worldOffset, new Cesium.Cartesian3());
-
-                        const finalCarto = Cesium.Cartographic.fromCartesian(finalPos);
-
-                        lanes[laneIdx].push({
-                            lat: Cesium.Math.toDegrees(finalCarto.latitude),
-                            lon: Cesium.Math.toDegrees(finalCarto.longitude),
-                            alt: alt
-                        });
-                    }
-                });
-            }
-
-            // Track where each user waypoint ends up in the grid
-            totalSteps = centerLine.length;
-            if (i < waypoints.length - 2) {
-                waypointIndices.push(totalSteps - 1); // Last step of this segment = intermediate waypoint
-            }
-        }
-
-        // Last waypoint is at the end
-        waypointIndices.push(centerLine.length - 1);
-
-        console.log(`[Planner] Grid created: ${centerLine.length} steps, Waypoint indices: ${waypointIndices.join(', ')}`);
-
-        return { lanes, centerLine, waypointIndices };
-    }
-
-    /**
-     * Sample building heights along a route using grid picking
-     * @param {Array} routePoints - Array of {lat, lon} points
-     * @returns {Promise<Object>} Height analysis results
-     */
-    /**
-     * Sample building heights for the entire grid using batch request
-     * Uses clampToHeightMostDetailed with explicit tileset reference
-     * @param {Object} grid - Grid structure from generateGridSamples
-     * @returns {Promise<Object>} Analyzed grid with obstacle heights
-     */
-    async function analyzeGrid(grid) {
-        if (!grid) return null;
-
-        console.log('[Planner] Batch sampling grid heights...');
-
-        // Ensure OSM tileset is ready
-        if (!osmTileset || !osmTileset.ready) {
-            console.warn('[Planner] OSM Buildings tileset not ready, waiting...');
-            await osmTileset.readyPromise;
-        }
-        console.log('[Planner] OSM Buildings tileset ready:', osmTileset.ready);
-
-        // Force render and wait for tiles to load in view area
-        viewer.scene.render();
-
-        // Wait for tiles in the current view to load (important for height sampling)
-        console.log('[Planner] Waiting for tiles to load in view area...');
-        let tilesLoaded = false;
-        let waitAttempts = 0;
-        const maxWaitAttempts = Math.max(1, Math.ceil(CONFIG.TILESET_LOAD_TIMEOUT_MS / 100));
-
-        while (!tilesLoaded && waitAttempts < maxWaitAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-            viewer.scene.render();
-            tilesLoaded = osmTileset.tilesLoaded;
-            waitAttempts++;
-        }
-        console.log(`[Planner] Tiles loaded: ${tilesLoaded} (waited ${waitAttempts * 100}ms)`);
-
-        // Flatten all lane points into a single array for batch request
-        const allPoints = [];
-        const map = []; // To map back: map[i] = { laneIdx, pointIdx }
-
-        grid.lanes.forEach((lane, laneIdx) => {
-            lane.forEach((point, pointIdx) => {
-                // Create Cartesian3 positions for clamping
-                // Use a high altitude to ensure we clamp DOWN onto buildings
-                const pos = Cesium.Cartesian3.fromDegrees(point.lon, point.lat, 1000);
-                allPoints.push(pos);
-                map.push({ laneIdx, pointIdx });
-            });
-        });
-
-        console.log(`[Planner] Sending ${allPoints.length} height queries using clampToHeightMostDetailed...`);
-
-        // Use clampToHeightMostDetailed to sample terrain AND 3D tiles
-        // IMPORTANT: Second param is objectsToEXCLUDE - pass empty array to INCLUDE everything
-        let clampedPositions;
-        try {
-            clampedPositions = await viewer.scene.clampToHeightMostDetailed(
-                allPoints,
-                [],  // Empty = exclude nothing = sample EVERYTHING including buildings
-                1.0  // Width for sampling (1m precision for better building edge detection)
-            );
-        } catch (error) {
-            console.error('[Planner] clampToHeightMostDetailed failed:', error);
-            // Fallback: use terrain only - return positions at ground level
-            clampedPositions = allPoints.map(pos => {
-                if (!pos) return null;
-                try {
-                    const carto = Cesium.Cartographic.fromCartesian(pos);
-                    return carto ? Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0) : null;
-                } catch (e) {
-                    return null;
-                }
-            });
-        }
-
-        // Also get terrain heights for AGL calculation
-        console.log('[Planner] Sampling terrain base heights...');
-        const terrainCartos = allPoints.map(pos => {
-            if (!pos) return Cesium.Cartographic.fromDegrees(0, 0, 0);
-            try {
-                return Cesium.Cartographic.fromCartesian(pos);
-            } catch (e) {
-                return Cesium.Cartographic.fromDegrees(0, 0, 0);
-            }
-        }).filter(c => c !== null);
-
-        let terrainHeights;
-        try {
-            terrainHeights = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, terrainCartos);
-        } catch (error) {
-            console.error('[Planner] Terrain sampling failed:', error);
-            terrainHeights = terrainCartos; // Use unsample cartos as fallback
-        }
-
-        // Map results back to grid
-        let maxObstacleHeight = -9999;
-        let maxBuildingHeight = 0;
-        let buildingsDetected = 0;
-
-        clampedPositions.forEach((clampedPos, i) => {
-            const { laneIdx, pointIdx } = map[i];
-            const point = grid.lanes[laneIdx][pointIdx];
-            const terrainCarto = terrainHeights[i];
-
-            // SAFETY CHECK: Skip if clampedPos is undefined (can happen with Cesium API)
-            if (!clampedPos) {
-                console.warn(`[Planner] Undefined clampedPos at index ${i}, using terrain height`);
-                point.obstacleHeight = terrainCarto ? terrainCarto.height : 0;
-                point.terrainHeight = terrainCarto ? terrainCarto.height : 0;
-                point.buildingHeight = 0;
-                return;
-            }
-
-            // Get clamped height (building top or terrain)
-            const clampedCarto = Cesium.Cartographic.fromCartesian(clampedPos);
-            if (!clampedCarto) {
-                console.warn(`[Planner] Failed to convert clampedPos at index ${i}`);
-                point.obstacleHeight = terrainCarto ? terrainCarto.height : 0;
-                point.terrainHeight = terrainCarto ? terrainCarto.height : 0;
-                point.buildingHeight = 0;
-                return;
-            }
-
-            const obstacleHeight = clampedCarto.height || 0;
-            const terrainHeight = terrainCarto ? (terrainCarto.height || 0) : 0;
-
-            point.obstacleHeight = obstacleHeight;
-            point.terrainHeight = terrainHeight;
-
-            // Calculate building height (AGL)
-            point.buildingHeight = Math.max(0, obstacleHeight - terrainHeight);
-
-            if (point.buildingHeight > 1) {
-                buildingsDetected++;
-            }
-
-            maxObstacleHeight = Math.max(maxObstacleHeight, obstacleHeight);
-            maxBuildingHeight = Math.max(maxBuildingHeight, point.buildingHeight);
-        });
-
-        console.log(`[Planner] Grid analysis complete.`);
-        console.log(`[Planner]   Max obstacle altitude: ${maxObstacleHeight.toFixed(1)}m`);
-        console.log(`[Planner]   Max building height (AGL): ${maxBuildingHeight.toFixed(1)}m`);
-        console.log(`[Planner]   Buildings detected: ${buildingsDetected}/${allPoints.length} sample points`);
-
-        return {
-            grid,
-            maxObstacleHeight,
-            maxBuildingHeight
-        };
-    }
-
-    /**
-     * Sample building heights along a flight path within the corridor radius
-     * This catches buildings that might be missed by the main grid sampling
-     * @param {Array} flightPath - Array of {lat, lon, alt} waypoints
-     * @returns {Promise<Object>} Maximum building heights found in corridor
-     */
-    async function sampleCorridorHeights(flightPath) {
-        if (!flightPath || flightPath.length < 2) return { maxHeight: 0, buildingsFound: 0 };
-
-        console.log('[Planner] Sampling corridor for missed buildings...');
-
-        // Generate sample points along path with lateral offsets
-        const samplePoints = [];
-        const corridorRadius = CONFIG.CORRIDOR_SAMPLE_RADIUS_M;
-        const spacing = CONFIG.CORRIDOR_SAMPLE_SPACING_M;
-
-        for (let i = 0; i < flightPath.length - 1; i++) {
-            const start = flightPath[i];
-            const end = flightPath[i + 1];
-
-            // Calculate segment distance and heading
-            const startCarto = Cesium.Cartographic.fromDegrees(start.lon, start.lat);
-            const endCarto = Cesium.Cartographic.fromDegrees(end.lon, end.lat);
-            const geodesic = new Cesium.EllipsoidGeodesic(startCarto, endCarto);
-            const distance = geodesic.surfaceDistance;
-            const heading = geodesic.startHeading;
-            const rightHeading = heading + (Math.PI / 2);
-
-            // Sample along segment
-            const numSteps = Math.max(1, Math.ceil(distance / spacing));
-            for (let j = 0; j <= numSteps; j++) {
-                const fraction = j / numSteps;
-                const centerPoint = geodesic.interpolateUsingSurfaceDistance(fraction * distance);
-                const centerCart = Cesium.Cartographic.toCartesian(centerPoint);
-
-                // Sample center and lateral offsets
-                const lateralOffsets = [-corridorRadius, -corridorRadius / 2, 0, corridorRadius / 2, corridorRadius];
-
-                for (const offset of lateralOffsets) {
-                    if (offset === 0) {
-                        samplePoints.push(Cesium.Cartesian3.fromDegrees(
-                            Cesium.Math.toDegrees(centerPoint.longitude),
-                            Cesium.Math.toDegrees(centerPoint.latitude),
-                            1000 // High altitude for clamping down
-                        ));
-                    } else {
-                        const transform = Cesium.Transforms.eastNorthUpToFixedFrame(centerCart);
-                        const matrix = Cesium.Matrix4.getMatrix3(transform, new Cesium.Matrix3());
-                        const enuRight = new Cesium.Cartesian3(
-                            Math.sin(rightHeading),
-                            Math.cos(rightHeading),
-                            0
-                        );
-                        const offsetVec = Cesium.Cartesian3.multiplyByScalar(enuRight, offset, new Cesium.Cartesian3());
-                        const worldOffset = Cesium.Matrix3.multiplyByVector(matrix, offsetVec, new Cesium.Cartesian3());
-                        const finalPos = Cesium.Cartesian3.add(centerCart, worldOffset, new Cesium.Cartesian3());
-                        const finalCarto = Cesium.Cartographic.fromCartesian(finalPos);
-
-                        samplePoints.push(Cesium.Cartesian3.fromDegrees(
-                            Cesium.Math.toDegrees(finalCarto.longitude),
-                            Cesium.Math.toDegrees(finalCarto.latitude),
-                            1000
-                        ));
-                    }
-                }
-            }
-        }
-
-        console.log(`[Planner] Corridor sampling: ${samplePoints.length} points`);
-
-        // Batch sample using clampToHeightMostDetailed
-        let maxHeight = 0;
-        let buildingsFound = 0;
-
-        try {
-            const clampedPositions = await viewer.scene.clampToHeightMostDetailed(
-                samplePoints,
-                [],
-                1.0
-            );
-
-            // Also get terrain heights
-            const terrainCartos = samplePoints.map(pos => {
-                try {
-                    return Cesium.Cartographic.fromCartesian(pos);
-                } catch (e) {
-                    return Cesium.Cartographic.fromDegrees(0, 0, 0);
-                }
-            });
-
-            const terrainHeights = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, terrainCartos);
-
-            for (let i = 0; i < clampedPositions.length; i++) {
-                const clampedPos = clampedPositions[i];
-                if (!clampedPos) continue;
-
-                const clampedCarto = Cesium.Cartographic.fromCartesian(clampedPos);
-                if (!clampedCarto) continue;
-
-                const obstacleHeight = clampedCarto.height || 0;
-                const terrainHeight = terrainHeights[i]?.height || 0;
-                const buildingHeight = obstacleHeight - terrainHeight;
-
-                if (buildingHeight > 2) {
-                    buildingsFound++;
-                    maxHeight = Math.max(maxHeight, obstacleHeight);
-                }
-            }
-
-            console.log(`[Planner] Corridor check: ${buildingsFound} building samples, max obstacle: ${maxHeight.toFixed(1)}m`);
-
-        } catch (error) {
-            console.warn('[Planner] Corridor sampling failed:', error);
-        }
-
-        return { maxHeight, buildingsFound };
-    }
 
     // ============================================================================
     // FAA Validation (Ported from safe-corridor.js)
@@ -994,255 +640,30 @@
             geofences = [];
         }
 
-        if (root.RoutePlanner && typeof root.RoutePlanner.calculateRoute === 'function') {
-            const result = await root.RoutePlanner.calculateRoute(waypoints, {
-                plannedAltitude,
-                defaultAltitudeM: plannedAltitude,
-                geofences,
-                OSM_BUILDINGS_ASSET_ID: CONFIG.OSM_BUILDINGS_ASSET_ID,
-                FAA_MAX_ALTITUDE_AGL_M: CONFIG.FAA_MAX_ALTITUDE_AGL_M,
-                DEFAULT_SAFETY_BUFFER_M: CONFIG.DEFAULT_SAFETY_BUFFER_M,
-                DEFAULT_SAMPLE_SPACING_M: CONFIG.DEFAULT_SAMPLE_SPACING_M,
-                DEFAULT_LANE_RADIUS_M: CONFIG.DEFAULT_LANE_RADIUS_M,
-                MAX_LANE_RADIUS_M: CONFIG.MAX_LANE_RADIUS_M,
-                LANE_EXPANSION_STEP_M: CONFIG.LANE_EXPANSION_STEP_M
-            });
-
-            if (Array.isArray(result?.waypoints) && result.waypoints.length) {
-                await updateOptimizedRouteVisualization(result.waypoints);
-            }
-
-            if (root.onRouteCalculated) {
-                root.onRouteCalculated(result);
-            }
-
-            return result;
+        // Route planning is now server-only - RoutePlanner must be available
+        if (!root.RoutePlanner || typeof root.RoutePlanner.calculateRoute !== 'function') {
+            throw new Error('Route planning service not available. RoutePlanner module is required.');
         }
 
         console.log('[Planner] ========================================');
-        console.log('[Planner] CALCULATING ROUTE (Global A*)');
+        console.log('[Planner] CALCULATING ROUTE (Server-side)');
         console.log('[Planner] ========================================');
 
-        // Step 0: Optimize View for Tile Loading
-        // Fly to the route area to ensure 3D tiles are prioritized for loading
-        console.log('[Planner] Focusing camera on route area...');
-        const boundingSphere = Cesium.BoundingSphere.fromPoints(
-            waypoints.map(wp => Cesium.Cartesian3.fromDegrees(wp.lon, wp.lat, wp.alt))
-        );
-
-        await new Promise(resolve => {
-            viewer.camera.flyToBoundingSphere(boundingSphere, {
-                duration: 1.0,
-                offset: new Cesium.HeadingPitchRange(0, -1.0, boundingSphere.radius * 2.5),
-                complete: resolve,
-                cancel: resolve
-            });
+        const result = await root.RoutePlanner.calculateRoute(waypoints, {
+            plannedAltitude,
+            defaultAltitudeM: plannedAltitude,
+            geofences,
+            OSM_BUILDINGS_ASSET_ID: CONFIG.OSM_BUILDINGS_ASSET_ID,
+            FAA_MAX_ALTITUDE_AGL_M: CONFIG.FAA_MAX_ALTITUDE_AGL_M,
+            DEFAULT_SAFETY_BUFFER_M: CONFIG.DEFAULT_SAFETY_BUFFER_M,
+            DEFAULT_SAMPLE_SPACING_M: CONFIG.DEFAULT_SAMPLE_SPACING_M,
+            DEFAULT_LANE_RADIUS_M: CONFIG.DEFAULT_LANE_RADIUS_M
         });
 
-        // Pause to allow Cesium to load tiles
-        await delay(300);
-
-        const spacingMeters = resolveGridSpacing(waypoints);
-        let laneRadius = CONFIG.DEFAULT_LANE_RADIUS_M;
-        const maxRadius = CONFIG.MAX_LANE_RADIUS_M;
-        const maxAttempts = Math.max(1, Math.ceil((maxRadius - laneRadius) / CONFIG.LANE_EXPANSION_STEP_M) + 1);
-        let attempt = 0;
-        let grid = null;
-        let analysis = null;
-        let result = null;
-
-        // Get planned altitude (average of waypoint altitudes - purely for reference)
-        // (plannedAltitude and geofences already resolved above for shared planner path)
-
-        while (attempt < maxAttempts && !result) {
-            const laneOffsets = resolveLaneOffsets(laneRadius);
-            console.log(`[Planner] Generating ${laneOffsets.length}-lane sampling grid (spacing: ${spacingMeters}m, radius: ${laneRadius}m)...`);
-            grid = generateGridSamples(waypoints, spacingMeters, laneOffsets);
-
-            // Step 2: Batch Analysis (Cesium interaction)
-            analysis = await analyzeGrid(grid);
-
-            console.log(`[Planner] Analysis: Max Obstacle ${analysis.maxObstacleHeight.toFixed(1)}m, Max Building ${analysis.maxBuildingHeight ? analysis.maxBuildingHeight.toFixed(1) : '0.0'}m`);
-
-            // Step 3: Validate Straight Line (Center Lane)
-            const centerLaneIdx = Math.floor(grid.lanes.length / 2);
-            console.log('[Planner] Validating straight-line path (Center Lane)...');
-            const centerLanePoints = grid.lanes[centerLaneIdx];
-            const centerAnalysis = {
-                points: centerLanePoints.map(p => ({
-                    ...p,
-                    obstacleHeight: p.obstacleHeight,
-                    terrainHeight: p.terrainHeight,
-                    buildingHeight: p.buildingHeight || 0
-                })),
-                maxObstacleHeight: analysis.maxObstacleHeight,
-                maxBuildingHeight: analysis.maxBuildingHeight || 0
-            };
-
-            const straightValidation = validateFAA(centerAnalysis, plannedAltitude);
-
-            if (straightValidation.isValid) {
-                // =====================================================
-                // STRAIGHT PATH IS VALID
-                // =====================================================
-                console.log('[Planner] OK: Straight path is valid');
-
-                // Create elevated waypoints for visualization (ground -> cruise)
-                // suggestedAltitude is the safe cruise height above obstacles
-                let cruiseAlt = straightValidation.suggestedAltitude;
-
-                // Create preliminary visual waypoints for corridor check
-                const prelimWaypoints = waypoints.map(wp => ({
-                    ...wp,
-                    terrainHeight: wp.alt,
-                    alt: cruiseAlt
-                }));
-
-                // --- CORRIDOR-WIDTH BUILDING CHECK ---
-                // Sample buildings within the visualization corridor radius
-                // to catch any buildings the grid sampling might have missed
-                const corridorCheck = await sampleCorridorHeights(prelimWaypoints);
-
-                if (corridorCheck.maxHeight > cruiseAlt - CONFIG.DEFAULT_SAFETY_BUFFER_M) {
-                    const newCruiseAlt = corridorCheck.maxHeight + CONFIG.DEFAULT_SAFETY_BUFFER_M;
-                    console.log(`[Planner] CORRIDOR CHECK: Found buildings at ${corridorCheck.maxHeight.toFixed(1)}m, raising cruise from ${cruiseAlt.toFixed(1)}m to ${newCruiseAlt.toFixed(1)}m`);
-                    cruiseAlt = newCruiseAlt;
-                }
-
-                const visualWaypoints = waypoints.map(wp => ({
-                    ...wp,
-                    terrainHeight: wp.alt,  // Original altitude is terrain
-                    alt: cruiseAlt          // Cruise at suggested safe altitude
-                }));
-
-                // Show the green line + safety corridor for direct path
-                await updateOptimizedRouteVisualization(visualWaypoints);
-
-                result = {
-                    waypoints: waypoints.map(wp => ({ ...wp })),
-                    samplePoints: grid.lanes[0].length * grid.lanes.length,
-                    plannedAltitude,
-                    analysis: centerAnalysis,
-                    validation: straightValidation,
-                    optimized: false,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-            }
-
-            // =====================================================
-            // BLOCKED - Global A* Optimization
-            // =====================================================
-            console.log('[Planner] WARN: Straight path blocked. Running Global A* Optimization...');
-
-            if (typeof root.RouteEngine === 'undefined') {
-                console.error('[Planner] RouteEngine not loaded - cannot optimize');
-                result = {
-                    waypoints: waypoints.map(wp => ({ ...wp })),
-                    samplePoints: grid.lanes[0].length * grid.lanes.length,
-                    plannedAltitude,
-                    analysis: centerAnalysis,
-                    validation: straightValidation,
-                    optimized: false,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-            }
-
-            // Pass the FULL GRID to RouteEngine
-            const optimization = root.RouteEngine.optimizeFlightPath(
-                waypoints,  // User waypoints (landing zones)
-                grid,       // Full grid with heights
-                geofences
-            );
-
-            if (optimization.success) {
-                // SEGMENT VALIDATION: Check for collisions BETWEEN waypoints
-                console.log('[Planner] Running segment collision validation...');
-                let validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
-                    optimization.waypoints,
-                    viewer
-                );
-
-                // --- CORRIDOR-WIDTH BUILDING CHECK ---
-                // Sample buildings within the visualization corridor radius
-                const corridorCheck = await sampleCorridorHeights(validatedWaypoints);
-
-                if (corridorCheck.buildingsFound > 0) {
-                    // Find waypoints that need altitude adjustment
-                    const minSafeAlt = corridorCheck.maxHeight + CONFIG.DEFAULT_SAFETY_BUFFER_M;
-                    let adjustedCount = 0;
-
-                    validatedWaypoints = validatedWaypoints.map(wp => {
-                        // Only adjust cruise waypoints (not ground phases)
-                        if (wp.phase && (wp.phase.includes('GROUND') || wp.phase === 'VERTICAL_DESCENT')) {
-                            return wp;
-                        }
-                        if (wp.alt < minSafeAlt) {
-                            adjustedCount++;
-                            return { ...wp, alt: minSafeAlt };
-                        }
-                        return wp;
-                    });
-
-                    if (adjustedCount > 0) {
-                        console.log(`[Planner] CORRIDOR CHECK: Raised ${adjustedCount} waypoints to ${minSafeAlt.toFixed(1)}m to clear buildings`);
-                    }
-                }
-
-                console.log('[Planner] OK: Optimized path generated (A*)');
-                await updateOptimizedRouteVisualization(validatedWaypoints);
-
-                result = {
-                    waypoints: validatedWaypoints,
-                    originalWaypoints: waypoints.map(wp => ({ ...wp })),
-                    samplePoints: grid.lanes[0].length * grid.lanes.length,
-                    optimizedPoints: validatedWaypoints.length,
-                    plannedAltitude: 0, // Varies
-                    analysis: centerAnalysis,
-                    validation: {
-                        isValid: true,
-                        violations: [],
-                        suggestedAltitude: 0,
-                        suggestedAGL: 0,
-                        maxObstacleHeight: analysis.maxObstacleHeight,
-                        maxBuildingHeight: analysis.maxBuildingHeight || 0,
-                        faaCompliant: true,
-                        summary: `APPROVED (A*): Optimal path found with ${optimization.nodesVisited} nodes visited`
-                    },
-                    optimized: true,
-                    optimization: optimization,
-                    profileView: optimization.profileView,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-            }
-
-            attempt += 1;
-            const nextRadius = Math.min(maxRadius, laneRadius + CONFIG.LANE_EXPANSION_STEP_M);
-            if (nextRadius <= laneRadius) break;
-            laneRadius = nextRadius;
-            console.warn(`[Planner] No path found. Expanding corridor to ${laneRadius}m and retrying...`);
+        if (Array.isArray(result?.waypoints) && result.waypoints.length) {
+            await updateOptimizedRouteVisualization(result.waypoints);
         }
 
-        if (!result) {
-            console.log('[Planner] ERROR: No valid A* path found');
-            result = {
-                waypoints: waypoints.map(wp => ({ ...wp })),
-                samplePoints: grid && grid.lanes.length ? grid.lanes[0].length * grid.lanes.length : 0,
-                plannedAltitude,
-                analysis: analysis || null,
-                validation: {
-                    isValid: false,
-                    violations: [],
-                    summary: 'DENIED: No legal path found within FAA limits'
-                },
-                optimized: false,
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        // Notify UI
         if (root.onRouteCalculated) {
             root.onRouteCalculated(result);
         }

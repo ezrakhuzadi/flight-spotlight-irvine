@@ -7,6 +7,7 @@
     'use strict';
 
     const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+    const ATC_SERVER_URL = window.__ATC_API_BASE__ || 'http://localhost:3000';
 
     const DEFAULTS = Object.assign({
         OSM_BUILDINGS_ASSET_ID: Number(CesiumConfig.osmBuildingsAssetId) || 96188,
@@ -22,7 +23,8 @@
         LANE_EXPANSION_STEP_M: 60,
         FAN_OFFSETS: null,
         TILESET_LOAD_TIMEOUT_MS: 15000,
-        TILESET_POLL_INTERVAL_MS: 200
+        TILESET_POLL_INTERVAL_MS: 200,
+        ALLOW_LOCAL_FALLBACK: false
     }, window.__ROUTE_PLANNER_CONFIG__ || {});
 
     const state = {
@@ -84,6 +86,69 @@
             lon: wp.lon,
             alt: Number.isFinite(wp.alt) ? wp.alt : fallbackAlt
         }));
+    }
+
+    async function requestServerRoute(waypoints, config) {
+        const payload = {
+            waypoints: waypoints.map((wp) => ({
+                lat: wp.lat,
+                lon: wp.lon,
+                altitude_m: wp.alt
+            })),
+            lane_radius_m: config.DEFAULT_LANE_RADIUS_M,
+            lane_spacing_m: config.LANE_SPACING_M,
+            sample_spacing_m: config.DEFAULT_SAMPLE_SPACING_M,
+            safety_buffer_m: config.DEFAULT_SAFETY_BUFFER_M
+        };
+
+        const response = await fetch(`${ATC_SERVER_URL}/v1/routes/plan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `Route plan failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data || data.ok === false) {
+            const errors = Array.isArray(data?.errors) ? data.errors.join(', ') : 'Route plan failed';
+            throw new Error(errors);
+        }
+        return data;
+    }
+
+    async function applyTerrainToServerWaypoints(waypoints) {
+        if (!state.viewer || !Array.isArray(waypoints) || waypoints.length === 0) {
+            return waypoints;
+        }
+
+        const cartos = waypoints.map((wp) => Cesium.Cartographic.fromDegrees(wp.lon, wp.lat));
+        let samples = [];
+        try {
+            samples = await Cesium.sampleTerrainMostDetailed(state.viewer.terrainProvider, cartos);
+        } catch (error) {
+            console.warn('[RoutePlanner] Terrain sample failed for server route:', error);
+            return waypoints.map((wp) => ({ ...wp, terrainHeight: 0 }));
+        }
+
+        return waypoints.map((wp, idx) => {
+            const terrainHeight = samples[idx]?.height || 0;
+            let alt = wp.alt;
+            if (!Number.isFinite(alt)) {
+                alt = terrainHeight;
+            } else if (Number.isFinite(terrainHeight) && alt < terrainHeight - 1) {
+                alt = alt + terrainHeight;
+            }
+
+            if (typeof wp.phase === 'string' && wp.phase.startsWith('GROUND')) {
+                alt = terrainHeight;
+            }
+
+            return { ...wp, alt, terrainHeight };
+        });
     }
 
     async function loadOsmBuildings(config) {
@@ -390,6 +455,92 @@
 
         await loadOsmBuildings(config);
         await focusCameraOnRoute(normalized);
+
+        try {
+            const serverResult = await requestServerRoute(normalized, config);
+            const plannedWaypoints = (serverResult.waypoints || []).map((wp) => ({
+                lat: wp.lat,
+                lon: wp.lon,
+                alt: wp.altitude_m,
+                phase: wp.phase
+            }));
+            const hydratedWaypoints = await applyTerrainToServerWaypoints(plannedWaypoints);
+            const hazards = Array.isArray(serverResult.hazards) ? serverResult.hazards : [];
+            const maxObstacleHeight = hazards.reduce((max, hazard) => {
+                const height = Number.isFinite(hazard.height_m) ? hazard.height_m : 0;
+                return Math.max(max, height);
+            }, 0);
+            const stats = serverResult.stats || {};
+            const suggestedAltitude = Number.isFinite(stats.max_altitude)
+                ? stats.max_altitude
+                : plannedAltitude;
+            const maxAgl = Number.isFinite(stats.max_agl) ? stats.max_agl : null;
+            const samplePoints = Number.isFinite(serverResult.sample_points)
+                ? serverResult.sample_points
+                : (serverResult.nodes_visited || hydratedWaypoints.length);
+
+            return {
+                waypoints: hydratedWaypoints.length ? hydratedWaypoints : normalized,
+                originalWaypoints: normalized,
+                samplePoints,
+                plannedAltitude,
+                analysis: {
+                    points: [],
+                    maxObstacleHeight,
+                    maxBuildingHeight: maxObstacleHeight,
+                    hazards
+                },
+                validation: {
+                    isValid: true,
+                    violations: [],
+                    suggestedAltitude,
+                    suggestedAGL: maxAgl,
+                    maxObstacleHeight,
+                    maxBuildingHeight: maxObstacleHeight,
+                    faaCompliant: maxAgl !== null ? maxAgl <= config.FAA_MAX_ALTITUDE_AGL_M : true,
+                    summary: `Server route plan (${serverResult.optimized_points || plannedWaypoints.length} points)`
+                },
+                optimized: true,
+                optimization: {
+                    nodesVisited: serverResult.nodes_visited || 0,
+                    stats: serverResult.stats || null
+                },
+                timestamp: new Date().toISOString()
+            };
+        } catch (error) {
+            const message = error && error.message ? error.message : 'ATC route plan failed';
+            if (!config.ALLOW_LOCAL_FALLBACK) {
+                return {
+                    waypoints: [],
+                    originalWaypoints: normalized,
+                    samplePoints: 0,
+                    plannedAltitude,
+                    analysis: {
+                        points: [],
+                        maxObstacleHeight: 0,
+                        maxBuildingHeight: 0,
+                        hazards: []
+                    },
+                    validation: {
+                        isValid: false,
+                        violations: [message],
+                        suggestedAltitude: null,
+                        suggestedAGL: null,
+                        maxObstacleHeight: 0,
+                        maxBuildingHeight: 0,
+                        faaCompliant: false,
+                        summary: `ATC route plan failed: ${message}`
+                    },
+                    optimized: false,
+                    optimization: {
+                        nodesVisited: 0,
+                        stats: null
+                    },
+                    timestamp: new Date().toISOString()
+                };
+            }
+            console.warn('[RoutePlanner] Server route plan failed, using local planner:', error);
+        }
 
         const spacing = resolveSampleSpacing(normalized, config);
         let laneRadius = config.DEFAULT_LANE_RADIUS_M;

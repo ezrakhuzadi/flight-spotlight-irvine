@@ -1,7 +1,7 @@
 <header class="main-header">
     <!-- Brand -->
     <a href="/control" class="brand">
-        <span class="brand-text">Control Center</span>
+        <span class="brand-text">Traffic Control</span>
     </a>
 
     <!-- Navigation Tabs -->
@@ -27,11 +27,11 @@
         <a href="/control/remote-id" class="nav-tab <%= activePage === 'remote-id' ? 'active' : '' %>">
             <span>Remote ID</span>
         </a>
-        <% if (user && user.role === 'authority') { %>
+        <% if (user && user.role==='authority' ) { %>
             <a href="/control/analytics" class="nav-tab <%= activePage === 'analytics' ? 'active' : '' %>">
                 <span>Analytics</span>
             </a>
-        <% } %>
+            <% } %>
     </nav>
 
     <!-- Spacer -->

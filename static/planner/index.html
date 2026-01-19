@@ -1194,8 +1194,15 @@
                 if (resolvedCount < filledCount) {
                     throw new Error('Resolve all waypoints before calculating');
                 }
-                await FlightPlanner.calculateRoute();
-                showToast('Route analysis complete', 'success');
+                const result = await FlightPlanner.calculateRoute();
+                if (!result || !result.validation || !result.validation.isValid) {
+                    const message = result && result.validation && result.validation.summary
+                        ? result.validation.summary
+                        : 'Route analysis failed';
+                    showToast(message, 'error');
+                } else {
+                    showToast('Route analysis complete', 'success');
+                }
             } catch (error) {
                 showToast(error.message, 'error');
                 updateValidationUI(null);
