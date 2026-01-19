@@ -20,10 +20,10 @@
     // Configuration
     // ============================================================================
 
-    const ENGINE_CONFIG = {
+    const ENGINE_CONFIG = Object.assign({
         // Physical Limits
         FAA_LIMIT_AGL: 121,            // FAA Part 107 limit (400ft ≈ 121m)
-        SAFETY_BUFFER_M: 15,           // Clearance above obstacles
+        SAFETY_BUFFER_M: 20,           // Clearance above obstacles
 
         // Flight Characteristics
         CLIMB_SPEED_MPS: 2.0,          // Climb speed (m/s)
@@ -36,10 +36,11 @@
         COST_CLIMB_PENALTY: 15.0,      // Penalty for altitude changes
         COST_LANE_CHANGE: 50.0,        // HIGH penalty for lateral moves (avoid zig-zag)
         COST_PROXIMITY_PENALTY: 100.0, // Penalty for flying adjacent to building walls
+        GEOFENCE_SAMPLE_STEP_M: 25,    // Sampling step for geofence checks
 
         // Earth Constants
         EARTH_RADIUS_M: 6371000
-    };
+    }, window.__ROUTE_ENGINE_CONFIG__ || {});
 
     // ============================================================================
     // Geodetic Helpers
@@ -58,6 +59,108 @@
     }
 
     // ============================================================================
+    // Geofence Helpers
+    // ============================================================================
+
+    function normalizeGeofenceType(value) {
+        return (value || '').toString().toLowerCase();
+    }
+
+    function normalizeAltitude(value, fallback) {
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    function computeGeofenceBounds(polygon) {
+        if (!Array.isArray(polygon) || polygon.length < 3) return null;
+        let minLat = Infinity;
+        let maxLat = -Infinity;
+        let minLon = Infinity;
+        let maxLon = -Infinity;
+        polygon.forEach(([lat, lon]) => {
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            minLon = Math.min(minLon, lon);
+            maxLon = Math.max(maxLon, lon);
+        });
+        if (!Number.isFinite(minLat) || !Number.isFinite(minLon)) return null;
+        return { minLat, maxLat, minLon, maxLon };
+    }
+
+    function pointInPolygon(lat, lon, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const yi = polygon[i][0];
+            const xi = polygon[i][1];
+            const yj = polygon[j][0];
+            const xj = polygon[j][1];
+            if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    function buildGeofenceIndex(geofences) {
+        if (!Array.isArray(geofences)) return [];
+        const indexed = [];
+        geofences.forEach((geofence) => {
+            if (!geofence || geofence.active === false) return;
+            const type = normalizeGeofenceType(geofence.geofence_type || geofence.type);
+            if (type === 'advisory') return;
+            const polygon = Array.isArray(geofence.polygon) ? geofence.polygon : [];
+            if (polygon.length < 3) return;
+            const bounds = computeGeofenceBounds(polygon);
+            if (!bounds) return;
+            const lower = normalizeAltitude(geofence.lower_altitude_m, 0);
+            const upper = normalizeAltitude(geofence.upper_altitude_m, 120);
+            indexed.push({
+                id: geofence.id || '',
+                bounds,
+                polygon,
+                lower: Math.min(lower, upper),
+                upper: Math.max(lower, upper)
+            });
+        });
+        return indexed;
+    }
+
+    function geofenceBlocksPoint(geofences, lat, lon, altitude) {
+        if (!geofences || !geofences.length) return false;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(altitude)) return true;
+        for (const geofence of geofences) {
+            const bounds = geofence.bounds;
+            if (lat < bounds.minLat || lat > bounds.maxLat || lon < bounds.minLon || lon > bounds.maxLon) {
+                continue;
+            }
+            if (altitude < geofence.lower || altitude > geofence.upper) {
+                continue;
+            }
+            if (pointInPolygon(lat, lon, geofence.polygon)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function geofenceBlocksSegment(geofences, startPoint, endPoint, startAlt, endAlt) {
+        if (!geofences || !geofences.length) return false;
+        const distance = calculateDistance(startPoint, endPoint);
+        const step = Math.max(1, ENGINE_CONFIG.GEOFENCE_SAMPLE_STEP_M);
+        const steps = Math.max(1, Math.min(200, Math.ceil(distance / step)));
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const lat = startPoint.lat + t * (endPoint.lat - startPoint.lat);
+            const lon = startPoint.lon + t * (endPoint.lon - startPoint.lon);
+            const alt = startAlt + t * (endAlt - startAlt);
+            if (geofenceBlocksPoint(geofences, lat, lon, alt)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ============================================================================
     // String Pulling Path Smoothing
     // ============================================================================
 
@@ -68,7 +171,7 @@
      * @param {Object} grid - The full grid with obstacle heights
      * @returns {Array} Smoothed path with fewer nodes
      */
-    function smoothPath(pathNodes, grid) {
+    function smoothPath(pathNodes, grid, geofences) {
         if (!pathNodes || pathNodes.length <= 2) return pathNodes;
 
         const smoothed = [pathNodes[0]]; // Always keep start
@@ -83,7 +186,7 @@
                 const target = pathNodes[targetIdx];
 
                 // Check if straight line from current to target is clear
-                if (isLineOfSightClear(current, target, pathNodes, currentIdx, targetIdx, grid)) {
+                if (isLineOfSightClear(current, target, pathNodes, currentIdx, targetIdx, grid, geofences)) {
                     furthestValid = targetIdx;
                 }
             }
@@ -107,7 +210,7 @@
      * @param {Object} grid - Grid with obstacle heights
      * @returns {boolean} True if line of sight is clear
      */
-    function isLineOfSightClear(start, end, allNodes, startIdx, endIdx, grid) {
+    function isLineOfSightClear(start, end, allNodes, startIdx, endIdx, grid, geofences) {
         // Get the cruise altitude (max altitude along this segment)
         let maxAlt = Math.max(start.alt, end.alt);
         for (let i = startIdx; i <= endIdx; i++) {
@@ -135,6 +238,12 @@
             const gridPoint = grid.lanes[midLane][midStep];
             const obstacleHeight = Math.max(gridPoint.obstacleHeight || 0, gridPoint.terrainHeight || 0);
             const minSafeAlt = obstacleHeight + ENGINE_CONFIG.SAFETY_BUFFER_M;
+            if (geofences && geofences.length) {
+                const sampleAlt = start.alt + t * (end.alt - start.alt);
+                if (geofenceBlocksPoint(geofences, gridPoint.lat, gridPoint.lon, sampleAlt)) {
+                    return false;
+                }
+            }
 
             // Check if we clear the obstacle VERTICALLY
             if (minSafeAlt > maxAlt) {
@@ -170,6 +279,15 @@
     // ============================================================================
 
     const RouteEngine = {
+        configure: function (config) {
+            if (!config || typeof config !== 'object') return ENGINE_CONFIG;
+            Object.assign(ENGINE_CONFIG, config);
+            return ENGINE_CONFIG;
+        },
+
+        getConfig: function () {
+            return { ...ENGINE_CONFIG };
+        },
 
         /**
          * Calculate minimal-cost path through the airspace
@@ -177,13 +295,14 @@
          * @param {Object} grid - The 5-lane sampled grid with heights
          * @returns {Object} Optimized path result
          */
-        optimizeFlightPath: function (originalWaypoints, grid) {
+        optimizeFlightPath: function (originalWaypoints, grid, geofences) {
             console.log('[RouteEngine] Starting Global A* Optimization...');
             const startTime = performance.now();
 
             const numLanes = grid.lanes.length;
             const numSteps = grid.lanes[0].length;
             const centerLaneIdx = Math.floor(numLanes / 2); // Center lane (dynamic)
+            const geofenceIndex = buildGeofenceIndex(geofences);
 
             // ---------------------------------------------------------
             // 1. Build The Graph (Implicitly) & Run A*
@@ -262,9 +381,6 @@
                         continue;
                     }
 
-                    // ---------------------------------------------
-                    // COST CALCULATION
-                    // ---------------------------------------------
                     // Distance cost
                     const currPoint = grid.lanes[current.lane][current.step];
                     const dist = calculateDistance(currPoint, nextPoint);
@@ -285,6 +401,11 @@
                         altCost = altChange * ENGINE_CONFIG.COST_CLIMB_PENALTY;
                     }
 
+                    const cruiseAlt = Math.max(currentAlt, targetAlt);
+                    if (geofenceIndex.length && geofenceBlocksSegment(geofenceIndex, currPoint, nextPoint, currentAlt, cruiseAlt)) {
+                        continue;
+                    }
+
                     // Lane Change Penalty
                     const laneChangeCost = Math.abs(nextLane - current.lane) * ENGINE_CONFIG.COST_LANE_CHANGE;
 
@@ -293,7 +414,6 @@
                     // Penalize flying adjacent to building walls
                     // ---------------------------------------------------------
                     let proximityCost = 0;
-                    const cruiseAlt = Math.max(currentAlt, targetAlt);
 
                     // Check LEFT neighbor
                     if (nextLane > 0) {
@@ -379,7 +499,7 @@
             // 2.5 String Pulling Path Smoothing
             // ---------------------------------------------------------
             // Remove unnecessary intermediate nodes when straight line is clear
-            const smoothedPath = smoothPath(pathNodes, grid);
+            const smoothedPath = smoothPath(pathNodes, grid, geofenceIndex);
 
             // ---------------------------------------------------------
             // 3. Post-Processing: Add Landing Zone Transitions
@@ -392,12 +512,11 @@
 
             console.log(`[RouteEngine] User waypoint grid indices: ${waypointIndices.join(', ')}`);
 
-            // Calculate cruise altitude (highest point along path + safety)
+            // Calculate maximum cruise altitude along path
             let maxCruiseAlt = 0;
             pathNodes.forEach(node => {
                 maxCruiseAlt = Math.max(maxCruiseAlt, node.alt);
             });
-            maxCruiseAlt += 15; // Extra buffer above highest obstacle
 
             // For each segment between user waypoints
             for (let wpIdx = 0; wpIdx < waypointIndices.length; wpIdx++) {
@@ -417,17 +536,36 @@
 
                 // === TAKEOFF (if not last waypoint) ===
                 if (!isLast) {
+                    // Use the highest required altitude for this segment
+                    const nextStepIdx = waypointIndices[wpIdx + 1];
+                    let segmentCruiseAlt = 0;
+
+                    smoothedPath.forEach(node => {
+                        if (node.step > stepIdx && node.step < nextStepIdx) {
+                            segmentCruiseAlt = Math.max(segmentCruiseAlt, node.alt);
+                        }
+                    });
+
+                    if (!segmentCruiseAlt) {
+                        // Calculate max obstacle height along this segment
+                        let maxObstacle = 0;
+                        for (let s = stepIdx; s <= nextStepIdx; s++) {
+                            const pt = grid.lanes[centerLaneIdx][s];
+                            maxObstacle = Math.max(maxObstacle, pt.obstacleHeight || 0, pt.terrainHeight || 0);
+                        }
+                        segmentCruiseAlt = maxObstacle + ENGINE_CONFIG.SAFETY_BUFFER_M;
+                    }
+
                     // Vertical ascent
                     finalWaypoints.push({
                         lat: point.lat,
                         lon: point.lon,
-                        alt: maxCruiseAlt,
+                        alt: segmentCruiseAlt,
                         phase: 'VERTICAL_ASCENT',
                         prio: 1
                     });
 
                     // Find path nodes between this waypoint and next
-                    const nextStepIdx = waypointIndices[wpIdx + 1];
 
                     // PATH SMOOTHING WITH CORNER ELBOWS + INTERMEDIATE POINTS
                     // When lane changes, output:
@@ -453,7 +591,7 @@
                                     finalWaypoints.push({
                                         lat: prevPoint.lat,
                                         lon: prevPoint.lon,
-                                        alt: maxCruiseAlt,
+                                        alt: segmentCruiseAlt,
                                         phase: 'CRUISE_CORNER',
                                         prio: 1
                                     });
@@ -464,7 +602,7 @@
                                 finalWaypoints.push({
                                     lat: nodePoint.lat,
                                     lon: nodePoint.lon,
-                                    alt: maxCruiseAlt,
+                                    alt: segmentCruiseAlt,
                                     phase: 'CRUISE',
                                     prio: 1
                                 });
@@ -480,7 +618,7 @@
                                         finalWaypoints.push({
                                             lat: nodePoint.lat,
                                             lon: nodePoint.lon,
-                                            alt: maxCruiseAlt,
+                                            alt: segmentCruiseAlt,
                                             phase: 'CRUISE_INTERMEDIATE',
                                             prio: 1
                                         });
@@ -499,7 +637,7 @@
                     finalWaypoints.push({
                         lat: nextPoint.lat,
                         lon: nextPoint.lon,
-                        alt: maxCruiseAlt,
+                        alt: segmentCruiseAlt,
                         phase: 'VERTICAL_DESCENT',
                         prio: 1
                     });

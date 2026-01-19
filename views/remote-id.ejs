@@ -148,11 +148,13 @@
                     </div>
                 </div>
 
+                ${ typeof demoMode !== 'undefined' && demoMode ? `
                 <div class="mb-md">
                     <button class="btn btn-ghost btn-sm" id="ridDemoBtn" onclick="RemoteID.startDemoTraffic()">
                         Load demo RID traffic
                     </button>
                 </div>
+                ` : '' }
 
                 <!-- Aircraft List -->
                 <div class="section-subtitle">Tracked Aircraft</div>

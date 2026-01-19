@@ -19,7 +19,7 @@ Web-based mission control interface for the ATC-Drone UTM (Unmanned Traffic Mana
 │  Control Center │────▶│   ATC Server    │◀────│   Drone SDK     │
 │   (This Repo)   │     │ (atc-drone/Rust)│     │ (atc-sdk/Rust)  │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-     Port 5000              Port 3000            Runs on drones
+     Port 5050              Port 3000            Runs on drones
 ```
 
 ## Quick Start
@@ -27,6 +27,7 @@ Web-based mission control interface for the ATC-Drone UTM (Unmanned Traffic Mana
 ### Prerequisites
 - Docker & Docker Compose
 - ATC Server running on `localhost:3000`
+  - If `/v1/drones/register` is locked down, set `ATC_REGISTRATION_TOKEN` to match the ATC server.
 
 ### Run with Docker
 
@@ -34,11 +35,16 @@ Web-based mission control interface for the ATC-Drone UTM (Unmanned Traffic Mana
 docker compose up -d
 ```
 
-Access at: http://localhost:5000
+Access at: http://localhost:5050
 
-### Default Credentials
-- **Guest:** `guest` / `guest123`
-- **Admin:** `admin` / `admin123`
+### Bootstrap Users
+Set these in `.env` (or container env) to seed the first admin account:
+- `ATC_BOOTSTRAP_ADMIN_EMAIL`
+- `ATC_BOOTSTRAP_ADMIN_PASSWORD`
+- Optional: `ATC_BOOTSTRAP_ADMIN_ID`, `ATC_BOOTSTRAP_ADMIN_NAME`
+
+For local demos only, you can allow the legacy defaults by setting:
+- `ATC_ALLOW_DEFAULT_USERS=1` (seeds `admin` and `guest`)
 
 ## Project Structure
 
@@ -89,7 +95,7 @@ A 3D drone flight path planner with FAA-compliant route validation.
 
 ### Quick Start
 
-1. Navigate to `http://localhost:5000/planner/`
+1. Navigate to `http://localhost:5050/control/flight-planner`
 2. Type start address → Press Enter → Geocodes & flies to location
 3. Type destination → Press Enter → Adds waypoint
 4. Click "Calculate Route" → A* finds optimal path
@@ -112,6 +118,10 @@ A 3D drone flight path planner with FAA-compliant route validation.
 |------|--------------|
 | `planner.js` | `SAFETY_BUFFER_M: 20`, `FAA_MAX_ALTITUDE: 121` |
 | `route-engine.js` | `COST_LANE_CHANGE: 50`, `COST_PROXIMITY_PENALTY: 100` |
+
+Runtime overrides:
+- `ATC_ROUTE_ENGINE_CONFIG` (JSON) to override route-engine constants
+- `ATC_ROUTE_PLANNER_CONFIG` (JSON) to override planner constants
 
 ---
 
@@ -144,4 +154,3 @@ Visit `/docs` for the drone integration SDK documentation, including:
 ## License
 
 Apache 2.0
-

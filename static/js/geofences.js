@@ -10,57 +10,13 @@
     // Configuration
     // ========================================================================
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.66, lon: -117.84, height: 8000 }
     };
-
-    // ========================================================================
-    // Demo Geofences (seeded when none exist)
-    // ========================================================================
-
-    const DEMO_GEOFENCES = [
-        {
-            name: 'UCI Campus Core',
-            geofence_type: 'no_fly_zone',
-            lower_altitude_m: 0,
-            upper_altitude_m: 120,
-            polygon: [
-                [33.6405, -117.8445],
-                [33.6505, -117.8445],
-                [33.6505, -117.8345],
-                [33.6405, -117.8345],
-                [33.6405, -117.8445]
-            ]
-        },
-        {
-            name: 'John Wayne Airport (SNA)',
-            geofence_type: 'restricted_area',
-            lower_altitude_m: 0,
-            upper_altitude_m: 400,
-            polygon: [
-                [33.6700, -117.8750],
-                [33.6850, -117.8750],
-                [33.6850, -117.8550],
-                [33.6700, -117.8550],
-                [33.6700, -117.8750]
-            ]
-        },
-        {
-            name: 'Construction Zone A',
-            geofence_type: 'temporary_restriction',
-            lower_altitude_m: 0,
-            upper_altitude_m: 60,
-            polygon: [
-                [33.6430, -117.8300],
-                [33.6460, -117.8300],
-                [33.6460, -117.8250],
-                [33.6430, -117.8250],
-                [33.6430, -117.8300]
-            ]
-        }
-    ];
 
     // ========================================================================
     // State
@@ -68,10 +24,10 @@
 
     let viewer = null;
     let geofences = [];
-    let seedAttempted = false;
     let activeFilter = 'all';
     const geofenceEntities = new Map();
     const canManage = window.APP_USER && window.APP_USER.role === 'authority';
+    let lastLoadError = null;
 
     // ========================================================================
     // Initialization
@@ -129,39 +85,16 @@
     async function loadGeofences() {
         try {
             const data = await API.getGeofences();
-            if (Array.isArray(data) && data.length) {
-                geofences = data;
-                renderGeofences();
-                return;
-            }
-
-            if (!seedAttempted) {
-                seedAttempted = true;
-                await seedDemoGeofences();
-                return loadGeofences();
-            }
+            lastLoadError = null;
+            geofences = Array.isArray(data) ? data : [];
+            renderGeofences();
+            return;
         } catch (error) {
             console.error('[Geofences] Failed to load geofences:', error);
+            lastLoadError = 'Unable to reach the ATC backend.';
         }
-
-        geofences = DEMO_GEOFENCES.map((gf, index) => ({
-            ...gf,
-            id: `demo-${index + 1}`,
-            active: true
-        }));
+        geofences = [];
         renderGeofences();
-    }
-
-    async function seedDemoGeofences() {
-        if (!Array.isArray(DEMO_GEOFENCES) || !DEMO_GEOFENCES.length) {
-            return;
-        }
-
-        try {
-            await Promise.all(DEMO_GEOFENCES.map((geofence) => API.createGeofence(geofence)));
-        } catch (error) {
-            console.error('[Geofences] Failed to seed demo geofences:', error);
-        }
     }
 
     function renderGeofences() {
@@ -207,6 +140,11 @@
     function updateStats() {
         const totalEl = document.getElementById('geofenceTotal');
         const noFlyEl = document.getElementById('geofenceNoFly');
+        if (lastLoadError) {
+            if (totalEl) totalEl.textContent = '--';
+            if (noFlyEl) noFlyEl.textContent = '--';
+            return;
+        }
         const active = geofences.filter((gf) => gf.active !== false);
         const total = active.length;
         const noFly = active.filter((gf) => gf.geofence_type === 'no_fly_zone').length;
@@ -217,6 +155,15 @@
     function renderGeofenceList() {
         const container = document.getElementById('geofenceList');
         if (!container) return;
+
+        if (lastLoadError) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding: 12px;">
+                    <div class="empty-state-text text-muted">${lastLoadError}</div>
+                </div>
+            `;
+            return;
+        }
 
         if (!geofences.length) {
             container.innerHTML = `

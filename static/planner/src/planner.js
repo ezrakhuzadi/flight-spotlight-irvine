@@ -19,7 +19,7 @@
     // Configuration
     // ============================================================================
 
-    const CONFIG = {
+    const CONFIG = Object.assign({
         // Cesium Assets
         OSM_BUILDINGS_ASSET_ID: 96188,
 
@@ -28,18 +28,24 @@
 
         // Safety Parameters
         DEFAULT_SAFETY_BUFFER_M: 20,
-        DEFAULT_SAMPLE_SPACING_M: 1,   // Sample every 5m (balance between accuracy and performance)
+        DEFAULT_SAMPLE_SPACING_M: 5,   // Sample every 5m (balance between accuracy and performance)
 
-        // Fan Search Lateral Offsets (13 lanes @ 15m spacing) - Dense for better obstacle coverage
-        FAN_OFFSETS: [-90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90],
+        // Fan Search Lateral Offsets
+        DEFAULT_LANE_SPACING_M: 15,
+        DEFAULT_LANE_RADIUS_M: 90,
+        MAX_LANE_RADIUS_M: 240,
+        LANE_EXPANSION_STEP_M: 60,
 
         TILESET_LOAD_TIMEOUT_MS: 15000,
         CAMERA_HEIGHT_ABOVE_TERRAIN: 600,
+        CORRIDOR_SAMPLE_RADIUS_M: 10,  // Sample radius for corridor (slightly > display radius of 8m)
+        CORRIDOR_SAMPLE_SPACING_M: 3,  // Dense sampling for corridor check
 
         // ATC Server Endpoint
         ATC_SERVER_URL: '',
-        SUBMIT_FLIGHT_ENDPOINT: '/v1/flights'
-    };
+        SUBMIT_FLIGHT_ENDPOINT: '/v1/flights',
+        DRONE_SPEED_MPS: 15
+    }, root.__ROUTE_PLANNER_CONFIG__ || safeParentValue('__ROUTE_PLANNER_CONFIG__') || {});
 
     const ATC_BASE_FALLBACK = '/api/atc';
 
@@ -201,6 +207,13 @@
         viewer.scene.primitives.add(osmTileset);
         await osmTileset.readyPromise;
         console.log('[Planner] OSM Buildings loaded');
+
+        if (root.RoutePlanner && typeof root.RoutePlanner.init === 'function') {
+            await root.RoutePlanner.init(viewer, {
+                loadBuildings: false,
+                osmTileset: osmTileset
+            });
+        }
 
         // Set up click handler for waypoint placement
         setupClickHandler();
@@ -494,10 +507,38 @@
      * @param {Number} spacingMeters - Spacing between steps
      * @returns {Object} Grid structure { lanes: [[{lat,lon,alt}, ...], ...], centerLine: [...] }
      */
-    function generateGridSamples(waypoints, spacingMeters) {
+    function buildLaneOffsets(radiusMeters, spacingMeters) {
+        const steps = Math.max(1, Math.floor(radiusMeters / spacingMeters));
+        const offsets = [];
+        for (let i = -steps; i <= steps; i++) {
+            offsets.push(i * spacingMeters);
+        }
+        if (!offsets.includes(0)) offsets.push(0);
+        return offsets.sort((a, b) => a - b);
+    }
+
+    function resolveLaneOffsets(radiusMeters) {
+        return buildLaneOffsets(radiusMeters, CONFIG.DEFAULT_LANE_SPACING_M);
+    }
+
+    function resolveGridSpacing(waypoints) {
+        if (!Array.isArray(waypoints) || waypoints.length < 2) {
+            return CONFIG.DEFAULT_SAMPLE_SPACING_M;
+        }
+        let distanceMeters = 0;
+        for (let i = 1; i < waypoints.length; i++) {
+            distanceMeters += calculateDistance(waypoints[i - 1], waypoints[i]);
+        }
+        if (distanceMeters > 8000) return 10;
+        if (distanceMeters > 4000) return 7.5;
+        if (distanceMeters > 2000) return 6;
+        return CONFIG.DEFAULT_SAMPLE_SPACING_M;
+    }
+
+    function generateGridSamples(waypoints, spacingMeters, laneOffsets = resolveLaneOffsets(CONFIG.DEFAULT_LANE_RADIUS_M)) {
         if (waypoints.length < 2) return null;
 
-        const lanes = CONFIG.FAN_OFFSETS.map(() => []);
+        const lanes = laneOffsets.map(() => []);
         const centerLine = [];
         const waypointIndices = [0]; // Track which grid steps are user waypoints (first is always 0)
         let totalSteps = 0;
@@ -538,7 +579,7 @@
                 });
 
                 // Generate lateral offset points for each lane
-                CONFIG.FAN_OFFSETS.forEach((offset, laneIdx) => {
+                laneOffsets.forEach((offset, laneIdx) => {
                     if (offset === 0) {
                         lanes[laneIdx].push({
                             lat: Cesium.Math.toDegrees(centerPoint.latitude),
@@ -625,7 +666,7 @@
         console.log('[Planner] Waiting for tiles to load in view area...');
         let tilesLoaded = false;
         let waitAttempts = 0;
-        const maxWaitAttempts = 20; // 2 seconds max
+        const maxWaitAttempts = Math.max(1, Math.ceil(CONFIG.TILESET_LOAD_TIMEOUT_MS / 100));
 
         while (!tilesLoaded && waitAttempts < maxWaitAttempts) {
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -751,6 +792,124 @@
         };
     }
 
+    /**
+     * Sample building heights along a flight path within the corridor radius
+     * This catches buildings that might be missed by the main grid sampling
+     * @param {Array} flightPath - Array of {lat, lon, alt} waypoints
+     * @returns {Promise<Object>} Maximum building heights found in corridor
+     */
+    async function sampleCorridorHeights(flightPath) {
+        if (!flightPath || flightPath.length < 2) return { maxHeight: 0, buildingsFound: 0 };
+
+        console.log('[Planner] Sampling corridor for missed buildings...');
+
+        // Generate sample points along path with lateral offsets
+        const samplePoints = [];
+        const corridorRadius = CONFIG.CORRIDOR_SAMPLE_RADIUS_M;
+        const spacing = CONFIG.CORRIDOR_SAMPLE_SPACING_M;
+
+        for (let i = 0; i < flightPath.length - 1; i++) {
+            const start = flightPath[i];
+            const end = flightPath[i + 1];
+
+            // Calculate segment distance and heading
+            const startCarto = Cesium.Cartographic.fromDegrees(start.lon, start.lat);
+            const endCarto = Cesium.Cartographic.fromDegrees(end.lon, end.lat);
+            const geodesic = new Cesium.EllipsoidGeodesic(startCarto, endCarto);
+            const distance = geodesic.surfaceDistance;
+            const heading = geodesic.startHeading;
+            const rightHeading = heading + (Math.PI / 2);
+
+            // Sample along segment
+            const numSteps = Math.max(1, Math.ceil(distance / spacing));
+            for (let j = 0; j <= numSteps; j++) {
+                const fraction = j / numSteps;
+                const centerPoint = geodesic.interpolateUsingSurfaceDistance(fraction * distance);
+                const centerCart = Cesium.Cartographic.toCartesian(centerPoint);
+
+                // Sample center and lateral offsets
+                const lateralOffsets = [-corridorRadius, -corridorRadius / 2, 0, corridorRadius / 2, corridorRadius];
+
+                for (const offset of lateralOffsets) {
+                    if (offset === 0) {
+                        samplePoints.push(Cesium.Cartesian3.fromDegrees(
+                            Cesium.Math.toDegrees(centerPoint.longitude),
+                            Cesium.Math.toDegrees(centerPoint.latitude),
+                            1000 // High altitude for clamping down
+                        ));
+                    } else {
+                        const transform = Cesium.Transforms.eastNorthUpToFixedFrame(centerCart);
+                        const matrix = Cesium.Matrix4.getMatrix3(transform, new Cesium.Matrix3());
+                        const enuRight = new Cesium.Cartesian3(
+                            Math.sin(rightHeading),
+                            Math.cos(rightHeading),
+                            0
+                        );
+                        const offsetVec = Cesium.Cartesian3.multiplyByScalar(enuRight, offset, new Cesium.Cartesian3());
+                        const worldOffset = Cesium.Matrix3.multiplyByVector(matrix, offsetVec, new Cesium.Cartesian3());
+                        const finalPos = Cesium.Cartesian3.add(centerCart, worldOffset, new Cesium.Cartesian3());
+                        const finalCarto = Cesium.Cartographic.fromCartesian(finalPos);
+
+                        samplePoints.push(Cesium.Cartesian3.fromDegrees(
+                            Cesium.Math.toDegrees(finalCarto.longitude),
+                            Cesium.Math.toDegrees(finalCarto.latitude),
+                            1000
+                        ));
+                    }
+                }
+            }
+        }
+
+        console.log(`[Planner] Corridor sampling: ${samplePoints.length} points`);
+
+        // Batch sample using clampToHeightMostDetailed
+        let maxHeight = 0;
+        let buildingsFound = 0;
+
+        try {
+            const clampedPositions = await viewer.scene.clampToHeightMostDetailed(
+                samplePoints,
+                [],
+                1.0
+            );
+
+            // Also get terrain heights
+            const terrainCartos = samplePoints.map(pos => {
+                try {
+                    return Cesium.Cartographic.fromCartesian(pos);
+                } catch (e) {
+                    return Cesium.Cartographic.fromDegrees(0, 0, 0);
+                }
+            });
+
+            const terrainHeights = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, terrainCartos);
+
+            for (let i = 0; i < clampedPositions.length; i++) {
+                const clampedPos = clampedPositions[i];
+                if (!clampedPos) continue;
+
+                const clampedCarto = Cesium.Cartographic.fromCartesian(clampedPos);
+                if (!clampedCarto) continue;
+
+                const obstacleHeight = clampedCarto.height || 0;
+                const terrainHeight = terrainHeights[i]?.height || 0;
+                const buildingHeight = obstacleHeight - terrainHeight;
+
+                if (buildingHeight > 2) {
+                    buildingsFound++;
+                    maxHeight = Math.max(maxHeight, obstacleHeight);
+                }
+            }
+
+            console.log(`[Planner] Corridor check: ${buildingsFound} building samples, max obstacle: ${maxHeight.toFixed(1)}m`);
+
+        } catch (error) {
+            console.warn('[Planner] Corridor sampling failed:', error);
+        }
+
+        return { maxHeight, buildingsFound };
+    }
+
     // ============================================================================
     // FAA Validation (Ported from safe-corridor.js)
     // ============================================================================
@@ -826,6 +985,40 @@
             throw new Error('Need at least 2 waypoints to calculate a route');
         }
 
+        const plannedAltitude = waypoints.reduce((sum, wp) => sum + wp.alt, 0) / waypoints.length;
+        let geofences = [];
+        try {
+            geofences = await refreshGeofences();
+        } catch (error) {
+            console.warn('[Planner] Failed to refresh geofences for routing:', error);
+            geofences = [];
+        }
+
+        if (root.RoutePlanner && typeof root.RoutePlanner.calculateRoute === 'function') {
+            const result = await root.RoutePlanner.calculateRoute(waypoints, {
+                plannedAltitude,
+                defaultAltitudeM: plannedAltitude,
+                geofences,
+                OSM_BUILDINGS_ASSET_ID: CONFIG.OSM_BUILDINGS_ASSET_ID,
+                FAA_MAX_ALTITUDE_AGL_M: CONFIG.FAA_MAX_ALTITUDE_AGL_M,
+                DEFAULT_SAFETY_BUFFER_M: CONFIG.DEFAULT_SAFETY_BUFFER_M,
+                DEFAULT_SAMPLE_SPACING_M: CONFIG.DEFAULT_SAMPLE_SPACING_M,
+                DEFAULT_LANE_RADIUS_M: CONFIG.DEFAULT_LANE_RADIUS_M,
+                MAX_LANE_RADIUS_M: CONFIG.MAX_LANE_RADIUS_M,
+                LANE_EXPANSION_STEP_M: CONFIG.LANE_EXPANSION_STEP_M
+            });
+
+            if (Array.isArray(result?.waypoints) && result.waypoints.length) {
+                await updateOptimizedRouteVisualization(result.waypoints);
+            }
+
+            if (root.onRouteCalculated) {
+                root.onRouteCalculated(result);
+            }
+
+            return result;
+        }
+
         console.log('[Planner] ========================================');
         console.log('[Planner] CALCULATING ROUTE (Global A*)');
         console.log('[Planner] ========================================');
@@ -837,75 +1030,106 @@
             waypoints.map(wp => Cesium.Cartesian3.fromDegrees(wp.lon, wp.lat, wp.alt))
         );
 
-        // Use flyToBoundingSphere for smooth transition
-        viewer.camera.flyToBoundingSphere(boundingSphere, {
-            duration: 1.0,
-            offset: new Cesium.HeadingPitchRange(0, -1.0, boundingSphere.radius * 2.5) // Top-down view
+        await new Promise(resolve => {
+            viewer.camera.flyToBoundingSphere(boundingSphere, {
+                duration: 1.0,
+                offset: new Cesium.HeadingPitchRange(0, -1.0, boundingSphere.radius * 2.5),
+                complete: resolve,
+                cancel: resolve
+            });
         });
 
         // Pause to allow Cesium to load tiles
-        await new Promise(r => setTimeout(r, 1500));
+        await delay(300);
 
-        // Step 1: Generate Grid Samples (5 lanes)
-        console.log(`[Planner] Generating 5-lane sampling grid (spacing: ${CONFIG.DEFAULT_SAMPLE_SPACING_M}m)...`);
-        const grid = generateGridSamples(waypoints, CONFIG.DEFAULT_SAMPLE_SPACING_M);
-
-        // Step 2: Batch Analysis (Cesium interaction)
-        const analysis = await analyzeGrid(grid);
-
-        console.log(`[Planner] Analysis: Max Obstacle ${analysis.maxObstacleHeight.toFixed(1)}m, Max Building ${analysis.maxBuildingHeight ? analysis.maxBuildingHeight.toFixed(1) : '0.0'}m`);
+        const spacingMeters = resolveGridSpacing(waypoints);
+        let laneRadius = CONFIG.DEFAULT_LANE_RADIUS_M;
+        const maxRadius = CONFIG.MAX_LANE_RADIUS_M;
+        const maxAttempts = Math.max(1, Math.ceil((maxRadius - laneRadius) / CONFIG.LANE_EXPANSION_STEP_M) + 1);
+        let attempt = 0;
+        let grid = null;
+        let analysis = null;
+        let result = null;
 
         // Get planned altitude (average of waypoint altitudes - purely for reference)
-        const plannedAltitude = waypoints.reduce((sum, wp) => sum + wp.alt, 0) / waypoints.length;
+        // (plannedAltitude and geofences already resolved above for shared planner path)
 
-        // Step 3: Validate Straight Line (Center Lane)
-        // Center lane is at index 2 (offset 0)
-        console.log('[Planner] Validating straight-line path (Center Lane)...');
-        const centerLanePoints = grid.lanes[2];
-        const centerAnalysis = {
-            points: centerLanePoints.map(p => ({
-                ...p,
-                obstacleHeight: p.obstacleHeight,
-                terrainHeight: p.terrainHeight,
-                buildingHeight: p.buildingHeight || 0
-            })),
-            maxObstacleHeight: analysis.maxObstacleHeight,
-            maxBuildingHeight: analysis.maxBuildingHeight || 0
-        };
+        while (attempt < maxAttempts && !result) {
+            const laneOffsets = resolveLaneOffsets(laneRadius);
+            console.log(`[Planner] Generating ${laneOffsets.length}-lane sampling grid (spacing: ${spacingMeters}m, radius: ${laneRadius}m)...`);
+            grid = generateGridSamples(waypoints, spacingMeters, laneOffsets);
 
-        const straightValidation = validateFAA(centerAnalysis, plannedAltitude);
+            // Step 2: Batch Analysis (Cesium interaction)
+            analysis = await analyzeGrid(grid);
 
-        let result;
+            console.log(`[Planner] Analysis: Max Obstacle ${analysis.maxObstacleHeight.toFixed(1)}m, Max Building ${analysis.maxBuildingHeight ? analysis.maxBuildingHeight.toFixed(1) : '0.0'}m`);
 
-        if (straightValidation.isValid) {
-            // =====================================================
-            // STRAIGHT PATH IS VALID
-            // =====================================================
-            console.log('[Planner] OK: Straight path is valid');
-
-            // Create elevated waypoints for visualization (ground -> cruise)
-            // suggestedAltitude is the safe cruise height above obstacles
-            const cruiseAlt = straightValidation.suggestedAltitude;
-            const visualWaypoints = waypoints.map(wp => ({
-                ...wp,
-                terrainHeight: wp.alt,  // Original altitude is terrain
-                alt: cruiseAlt          // Cruise at suggested safe altitude
-            }));
-
-            // Show the green line + safety corridor for direct path
-            updateOptimizedRouteVisualization(visualWaypoints);
-
-            result = {
-                waypoints: waypoints.map(wp => ({ ...wp })),
-                samplePoints: grid.lanes[0].length * 5,
-                plannedAltitude,
-                analysis: centerAnalysis,
-                validation: straightValidation,
-                optimized: false,
-                timestamp: new Date().toISOString()
+            // Step 3: Validate Straight Line (Center Lane)
+            const centerLaneIdx = Math.floor(grid.lanes.length / 2);
+            console.log('[Planner] Validating straight-line path (Center Lane)...');
+            const centerLanePoints = grid.lanes[centerLaneIdx];
+            const centerAnalysis = {
+                points: centerLanePoints.map(p => ({
+                    ...p,
+                    obstacleHeight: p.obstacleHeight,
+                    terrainHeight: p.terrainHeight,
+                    buildingHeight: p.buildingHeight || 0
+                })),
+                maxObstacleHeight: analysis.maxObstacleHeight,
+                maxBuildingHeight: analysis.maxBuildingHeight || 0
             };
 
-        } else {
+            const straightValidation = validateFAA(centerAnalysis, plannedAltitude);
+
+            if (straightValidation.isValid) {
+                // =====================================================
+                // STRAIGHT PATH IS VALID
+                // =====================================================
+                console.log('[Planner] OK: Straight path is valid');
+
+                // Create elevated waypoints for visualization (ground -> cruise)
+                // suggestedAltitude is the safe cruise height above obstacles
+                let cruiseAlt = straightValidation.suggestedAltitude;
+
+                // Create preliminary visual waypoints for corridor check
+                const prelimWaypoints = waypoints.map(wp => ({
+                    ...wp,
+                    terrainHeight: wp.alt,
+                    alt: cruiseAlt
+                }));
+
+                // --- CORRIDOR-WIDTH BUILDING CHECK ---
+                // Sample buildings within the visualization corridor radius
+                // to catch any buildings the grid sampling might have missed
+                const corridorCheck = await sampleCorridorHeights(prelimWaypoints);
+
+                if (corridorCheck.maxHeight > cruiseAlt - CONFIG.DEFAULT_SAFETY_BUFFER_M) {
+                    const newCruiseAlt = corridorCheck.maxHeight + CONFIG.DEFAULT_SAFETY_BUFFER_M;
+                    console.log(`[Planner] CORRIDOR CHECK: Found buildings at ${corridorCheck.maxHeight.toFixed(1)}m, raising cruise from ${cruiseAlt.toFixed(1)}m to ${newCruiseAlt.toFixed(1)}m`);
+                    cruiseAlt = newCruiseAlt;
+                }
+
+                const visualWaypoints = waypoints.map(wp => ({
+                    ...wp,
+                    terrainHeight: wp.alt,  // Original altitude is terrain
+                    alt: cruiseAlt          // Cruise at suggested safe altitude
+                }));
+
+                // Show the green line + safety corridor for direct path
+                await updateOptimizedRouteVisualization(visualWaypoints);
+
+                result = {
+                    waypoints: waypoints.map(wp => ({ ...wp })),
+                    samplePoints: grid.lanes[0].length * grid.lanes.length,
+                    plannedAltitude,
+                    analysis: centerAnalysis,
+                    validation: straightValidation,
+                    optimized: false,
+                    timestamp: new Date().toISOString()
+                };
+                break;
+            }
+
             // =====================================================
             // BLOCKED - Global A* Optimization
             // =====================================================
@@ -915,72 +1139,107 @@
                 console.error('[Planner] RouteEngine not loaded - cannot optimize');
                 result = {
                     waypoints: waypoints.map(wp => ({ ...wp })),
-                    samplePoints: grid.lanes[0].length * 5,
+                    samplePoints: grid.lanes[0].length * grid.lanes.length,
                     plannedAltitude,
                     analysis: centerAnalysis,
                     validation: straightValidation,
                     optimized: false,
                     timestamp: new Date().toISOString()
                 };
-            } else {
-                // Pass the FULL GRID to RouteEngine
-                const optimization = root.RouteEngine.optimizeFlightPath(
-                    waypoints,  // User waypoints (landing zones)
-                    grid        // Full grid with heights
+                break;
+            }
+
+            // Pass the FULL GRID to RouteEngine
+            const optimization = root.RouteEngine.optimizeFlightPath(
+                waypoints,  // User waypoints (landing zones)
+                grid,       // Full grid with heights
+                geofences
+            );
+
+            if (optimization.success) {
+                // SEGMENT VALIDATION: Check for collisions BETWEEN waypoints
+                console.log('[Planner] Running segment collision validation...');
+                let validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
+                    optimization.waypoints,
+                    viewer
                 );
 
-                if (optimization.success) {
-                    // SEGMENT VALIDATION: Check for collisions BETWEEN waypoints
-                    console.log('[Planner] Running segment collision validation...');
-                    const validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
-                        optimization.waypoints,
-                        viewer
-                    );
+                // --- CORRIDOR-WIDTH BUILDING CHECK ---
+                // Sample buildings within the visualization corridor radius
+                const corridorCheck = await sampleCorridorHeights(validatedWaypoints);
 
-                    console.log('[Planner] OK: Optimized path generated (A*)');
-                    updateOptimizedRouteVisualization(validatedWaypoints);
+                if (corridorCheck.buildingsFound > 0) {
+                    // Find waypoints that need altitude adjustment
+                    const minSafeAlt = corridorCheck.maxHeight + CONFIG.DEFAULT_SAFETY_BUFFER_M;
+                    let adjustedCount = 0;
 
-                    result = {
-                        waypoints: validatedWaypoints,
-                        originalWaypoints: waypoints.map(wp => ({ ...wp })),
-                        samplePoints: grid.lanes[0].length * grid.lanes.length,
-                        optimizedPoints: validatedWaypoints.length,
-                        plannedAltitude: 0, // Varies
-                        analysis: centerAnalysis,
-                        validation: {
-                            isValid: true,
-                            violations: [],
-                            suggestedAltitude: 0,
-                            suggestedAGL: 0,
-                            maxObstacleHeight: analysis.maxObstacleHeight,
-                            maxBuildingHeight: analysis.maxBuildingHeight || 0,
-                            faaCompliant: true,
-                            summary: `APPROVED (A*): Optimal path found with ${optimization.nodesVisited} nodes visited`
-                        },
-                        optimized: true,
-                        optimization: optimization,
-                        profileView: optimization.profileView,
-                        timestamp: new Date().toISOString()
-                    };
+                    validatedWaypoints = validatedWaypoints.map(wp => {
+                        // Only adjust cruise waypoints (not ground phases)
+                        if (wp.phase && (wp.phase.includes('GROUND') || wp.phase === 'VERTICAL_DESCENT')) {
+                            return wp;
+                        }
+                        if (wp.alt < minSafeAlt) {
+                            adjustedCount++;
+                            return { ...wp, alt: minSafeAlt };
+                        }
+                        return wp;
+                    });
 
-                } else {
-                    console.log('[Planner] ERROR: No valid A* path found');
-
-                    result = {
-                        waypoints: waypoints.map(wp => ({ ...wp })),
-                        samplePoints: grid.lanes[0].length * 5,
-                        plannedAltitude,
-                        analysis: centerAnalysis,
-                        validation: {
-                            isValid: false,
-                            violations: [],
-                            summary: `DENIED: No valid path found through obstacles`
-                        },
-                        optimized: false,
-                        timestamp: new Date().toISOString()
-                    };
+                    if (adjustedCount > 0) {
+                        console.log(`[Planner] CORRIDOR CHECK: Raised ${adjustedCount} waypoints to ${minSafeAlt.toFixed(1)}m to clear buildings`);
+                    }
                 }
+
+                console.log('[Planner] OK: Optimized path generated (A*)');
+                await updateOptimizedRouteVisualization(validatedWaypoints);
+
+                result = {
+                    waypoints: validatedWaypoints,
+                    originalWaypoints: waypoints.map(wp => ({ ...wp })),
+                    samplePoints: grid.lanes[0].length * grid.lanes.length,
+                    optimizedPoints: validatedWaypoints.length,
+                    plannedAltitude: 0, // Varies
+                    analysis: centerAnalysis,
+                    validation: {
+                        isValid: true,
+                        violations: [],
+                        suggestedAltitude: 0,
+                        suggestedAGL: 0,
+                        maxObstacleHeight: analysis.maxObstacleHeight,
+                        maxBuildingHeight: analysis.maxBuildingHeight || 0,
+                        faaCompliant: true,
+                        summary: `APPROVED (A*): Optimal path found with ${optimization.nodesVisited} nodes visited`
+                    },
+                    optimized: true,
+                    optimization: optimization,
+                    profileView: optimization.profileView,
+                    timestamp: new Date().toISOString()
+                };
+                break;
             }
+
+            attempt += 1;
+            const nextRadius = Math.min(maxRadius, laneRadius + CONFIG.LANE_EXPANSION_STEP_M);
+            if (nextRadius <= laneRadius) break;
+            laneRadius = nextRadius;
+            console.warn(`[Planner] No path found. Expanding corridor to ${laneRadius}m and retrying...`);
+        }
+
+        if (!result) {
+            console.log('[Planner] ERROR: No valid A* path found');
+            result = {
+                waypoints: waypoints.map(wp => ({ ...wp })),
+                samplePoints: grid && grid.lanes.length ? grid.lanes[0].length * grid.lanes.length : 0,
+                plannedAltitude,
+                analysis: analysis || null,
+                validation: {
+                    isValid: false,
+                    violations: [],
+                    summary: 'DENIED: No legal path found within FAA limits'
+                },
+                optimized: false,
+                timestamp: new Date().toISOString()
+            };
         }
 
         // Notify UI
@@ -1261,13 +1520,17 @@
         console.log('[Planner] ========================================');
 
         // Configuration
-        const DRONE_SPEED_MPS = 15; // 15 meters per second
+        const droneSpeed = CONFIG.DRONE_SPEED_MPS;
 
-        // Generate unique flight ID
-        const flightId = generateFlightId();
+        // Generate or reuse a unique flight ID (allows external pre-declaration)
+        const requestedFlightId = routeData && (routeData.flightId || routeData.flight_id);
+        const flightId = requestedFlightId || generateFlightId();
+        if (routeData && !routeData.flightId) {
+            routeData.flightId = flightId;
+        }
 
         // Calculate time offsets for each waypoint
-        const waypointsWithTime = calculateTimeOffsets(routeData.waypoints, DRONE_SPEED_MPS);
+        const waypointsWithTime = calculateTimeOffsets(routeData.waypoints, droneSpeed);
 
         // Calculate total flight time
         const totalFlightTime = waypointsWithTime.length > 0
@@ -1281,7 +1544,11 @@
         }
 
         // Generate high-fidelity 4D trajectory (1m spacing for conflict detection)
-        const trajectoryLog = densifyRoute(routeData.waypoints, DRONE_SPEED_MPS);
+        const trajectoryLog = densifyRoute(routeData.waypoints, droneSpeed);
+
+        const estimatedMinutes = totalFlightTime > 0 ? totalFlightTime / 60 : 0;
+        const reserveMin = Math.max(5, Math.ceil(estimatedMinutes * 0.2));
+        const capacityMin = Math.ceil(estimatedMinutes + reserveMin + 2);
 
         // Construct the payload matching backend schema
         const payload = {
@@ -1289,19 +1556,28 @@
             waypoints: waypointsWithTime,
             trajectory_log: trajectoryLog,  // High-fidelity 1m-spaced trajectory
             metadata: {
-                drone_speed_mps: DRONE_SPEED_MPS,
+                drone_speed_mps: droneSpeed,
                 total_distance_m: Math.round(totalDistance),
                 total_flight_time_s: Math.round(totalFlightTime),
                 trajectory_points: trajectoryLog.length,
                 planned_altitude_m: routeData.plannedAltitude,
                 max_obstacle_height_m: routeData.analysis.maxObstacleHeight,
                 faa_compliant: routeData.validation.faaCompliant,
-                submitted_at: new Date().toISOString()
+                submitted_at: new Date().toISOString(),
+                operation_type: 1,
+                battery_capacity_min: capacityMin,
+                battery_reserve_min: reserveMin,
+                clearance_m: 60,
+                compliance_override_enabled: false
             }
         };
 
         if (selectedDroneId) {
             payload.metadata.drone_id = selectedDroneId;
+        }
+        const blenderDeclarationId = routeData && (routeData.blenderDeclarationId || routeData.blender_declaration_id);
+        if (blenderDeclarationId) {
+            payload.metadata.blender_declaration_id = blenderDeclarationId;
         }
 
         try {

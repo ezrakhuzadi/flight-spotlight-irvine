@@ -90,9 +90,11 @@
         return emailMatch || droneMatch;
     }
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2000 }
     };
 
@@ -263,7 +265,25 @@
 
         try {
             const declarationId = mission.id || mission.pk || null;
-            const metadata = declarationId ? { blender_declaration_id: declarationId } : undefined;
+            const compliance = mission?.flight_declaration_geo_json?.features?.[0]?.properties?.compliance;
+            const battery = compliance?.checks?.battery || {};
+            const obstacles = compliance?.checks?.obstacles || {};
+            const override = compliance?.override || {};
+            const cruiseSpeed = Number(battery.cruiseSpeedMps);
+            const capacityMin = Number(battery.capacityMin);
+            const reserveMin = Number(battery.reserveMin);
+            const clearanceM = Number(obstacles.clearanceM);
+
+            const metadata = {
+                blender_declaration_id: declarationId || undefined,
+                drone_speed_mps: Number.isFinite(cruiseSpeed) && cruiseSpeed > 0 ? cruiseSpeed : undefined,
+                battery_capacity_min: Number.isFinite(capacityMin) ? capacityMin : undefined,
+                battery_reserve_min: Number.isFinite(reserveMin) ? reserveMin : undefined,
+                clearance_m: Number.isFinite(clearanceM) ? clearanceM : undefined,
+                operation_type: Number(mission.type_of_operation || 1),
+                compliance_override_enabled: !!override.enabled,
+                compliance_override_notes: override.notes || undefined
+            };
             await API.createFlightPlan({
                 drone_id: mission.aircraft_id,
                 waypoints,

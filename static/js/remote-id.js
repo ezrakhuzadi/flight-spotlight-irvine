@@ -1,6 +1,6 @@
 /**
  * Remote ID Page - ASTM F3411 Remote ID Display
- * Fetches and displays Remote ID data from Flight Blender
+ * Fetches and displays Remote ID data from ATC (RID traffic pulled via Blender/DSS)
  */
 
 (function () {
@@ -10,13 +10,16 @@
     // Configuration
     // ========================================================================
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 5000 },
-        API_BASE: '',
+        ATC_API_BASE: window.__ATC_API_BASE__ || '/api/atc',
+        RID_PROXY_BASE: '',
         REFRESH_INTERVAL: 2000,
-        SUBSCRIPTION_TTL_MS: 25000,
+        VIEW_UPDATE_TTL_MS: 25000,
         VIEW_CHANGE_THRESHOLD_DEG: 0.01,
         DEFAULT_VIEW_BUFFER_DEG: 0.03,
         MAX_VIEW_DIAGONAL_KM: 10,
@@ -32,9 +35,9 @@
     const aircraftLastSeen = new Map();
     let selectedAircraftId = null;
     let refreshInterval = null;
-    let subscriptionId = null;
-    let lastSubscriptionAt = 0;
-    let subscriptionPromise = null;
+    let lastViewUpdateAt = 0;
+    let viewUpdatePromise = null;
+    let lastViewParam = null;
     let lastViewBounds = null;
     let demoInFlight = false;
     let autoFocusDone = false;
@@ -220,61 +223,59 @@
         );
     }
 
-    async function createSubscription(viewParam) {
-        if (subscriptionPromise) {
-            return subscriptionPromise;
+    async function updateRidView(viewBounds) {
+        if (viewUpdatePromise) {
+            return viewUpdatePromise;
         }
 
-        subscriptionPromise = (async () => {
+        viewUpdatePromise = (async () => {
+            const payload = {
+                min_lat: viewBounds.south,
+                min_lon: viewBounds.west,
+                max_lat: viewBounds.north,
+                max_lon: viewBounds.east
+            };
+
             const response = await fetch(
-                `${CONFIG.API_BASE}/api/rid/subscription?view=${encodeURIComponent(viewParam)}`,
+                `${CONFIG.ATC_API_BASE}/v1/rid/view`,
                 {
-                    method: 'PUT',
-                    credentials: 'same-origin'
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 }
             );
 
             if (!response.ok) {
                 const text = await response.text();
-                throw new Error(`Subscription failed (${response.status}): ${text}`);
+                throw new Error(`RID view update failed (${response.status}): ${text}`);
             }
 
-            const payload = await response.json();
-            return payload?.dss_subscription_response?.dss_subscription_id || payload?.dss_subscription_id || null;
+            await response.json();
+            return payload;
         })();
 
         try {
-            return await subscriptionPromise;
+            return await viewUpdatePromise;
         } finally {
-            subscriptionPromise = null;
+            viewUpdatePromise = null;
         }
     }
 
-    async function fetchRidData(activeSubscriptionId) {
+    async function fetchRidTraffic() {
         const response = await fetch(
-            `${CONFIG.API_BASE}/api/rid/data/${activeSubscriptionId}`,
+            `${CONFIG.ATC_API_BASE}/v1/traffic?include_external=1&source=rid`,
             {
                 credentials: 'same-origin'
             }
         );
-
-        if (response.status === 404) {
-            return null;
-        }
 
         if (!response.ok) {
             const text = await response.text();
             throw new Error(`RID data error (${response.status}): ${text}`);
         }
 
-        const payload = await response.json();
-        if (Array.isArray(payload)) {
-            return payload;
-        }
-        if (payload && Array.isArray(payload.flights)) {
-            return payload.flights;
-        }
-        return [];
+        return await response.json();
     }
 
     function toNumber(value) {
@@ -285,10 +286,47 @@
         return Number.isFinite(parsed) ? parsed : null;
     }
 
+    function normalizeTrafficEntry(observation) {
+        if (!observation || typeof observation !== 'object') {
+            return null;
+        }
+
+        if (observation.drone_id) {
+            const lat = toNumber(observation.lat);
+            const lon = toNumber(observation.lon);
+            if (lat === null || lon === null) {
+                return null;
+            }
+
+            return {
+                id: observation.drone_id,
+                lat,
+                lon,
+                altitude_m: toNumber(observation.altitude_m),
+                speed_mps: toNumber(observation.speed_mps),
+                heading_deg: toNumber(observation.heading_deg),
+                timestamp: observation.last_update || observation.timestamp || null
+            };
+        }
+
+        return null;
+    }
+
     function normalizeObservations(observations) {
         const byId = new Map();
 
         observations.forEach(observation => {
+            const traffic = normalizeTrafficEntry(observation);
+            if (traffic) {
+                const existing = byId.get(traffic.id);
+                if (!existing || (existing.timestamp && traffic.timestamp && traffic.timestamp > existing.timestamp)) {
+                    byId.set(traffic.id, traffic);
+                } else if (!existing) {
+                    byId.set(traffic.id, traffic);
+                }
+                return;
+            }
+
             const metadata = observation.metadata || {};
             const currentState = metadata.current_state || metadata.currentState || {};
             const position = currentState.position || {};
@@ -354,34 +392,15 @@
             const viewBounds = normalizeViewBounds(getViewBounds());
             const now = Date.now();
 
-            if (!subscriptionId ||
-                viewChanged(lastViewBounds, viewBounds) ||
-                now - lastSubscriptionAt > CONFIG.SUBSCRIPTION_TTL_MS) {
-                const viewParam = toViewParam(viewBounds);
-                const newSubscriptionId = await createSubscription(viewParam);
-                if (newSubscriptionId) {
-                    subscriptionId = newSubscriptionId;
-                    lastSubscriptionAt = now;
-                    lastViewBounds = viewBounds;
-                }
+            if (viewChanged(lastViewBounds, viewBounds) ||
+                now - lastViewUpdateAt > CONFIG.VIEW_UPDATE_TTL_MS) {
+                await updateRidView(viewBounds);
+                lastViewUpdateAt = now;
+                lastViewBounds = viewBounds;
+                lastViewParam = toViewParam(viewBounds);
             }
 
-            if (!subscriptionId) {
-                updateStatus('error', 'Remote ID subscription unavailable');
-                updateAircraftList([]);
-                updateMap([]);
-                return;
-            }
-
-            const observations = await fetchRidData(subscriptionId);
-            if (observations === null) {
-                subscriptionId = null;
-                updateStatus('connecting', 'Refreshing Remote ID subscription...');
-                const stale = getStaleAircraft();
-                updateAircraftList(stale, { stale: true });
-                updateMap(stale);
-                return;
-            }
+            const observations = await fetchRidTraffic();
             const aircraft = normalizeObservations(observations);
             const lastSeenNow = Date.now();
 
@@ -429,26 +448,23 @@
 
         try {
             const center = getViewCenter();
-            if (!subscriptionId) {
-                const viewBounds = normalizeViewBounds(getViewBounds());
-                const viewParam = toViewParam(viewBounds);
-                const newSubscriptionId = await createSubscription(viewParam);
-                if (newSubscriptionId) {
-                    subscriptionId = newSubscriptionId;
-                    lastSubscriptionAt = Date.now();
-                    lastViewBounds = viewBounds;
-                }
+            const viewBounds = normalizeViewBounds(getViewBounds());
+            try {
+                await updateRidView(viewBounds);
+                lastViewUpdateAt = Date.now();
+                lastViewBounds = viewBounds;
+                lastViewParam = toViewParam(viewBounds);
+            } catch (error) {
+                console.warn('[RemoteID] RID view update failed before demo injection:', error);
             }
-            if (!subscriptionId) {
-                throw new Error('No subscription available for demo injection');
-            }
-            const response = await fetch(`${CONFIG.API_BASE}/api/rid/demo`, {
+
+            const response = await fetch(`${CONFIG.RID_PROXY_BASE}/api/rid/demo`, {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     center,
-                    subscription_id: subscriptionId
+                    subscription_id: lastViewParam || null
                 })
             });
             if (!response.ok) {

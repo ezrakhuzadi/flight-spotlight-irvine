@@ -6,9 +6,11 @@
 (function () {
     'use strict';
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.66, lon: -117.84, height: 6000 }
     };
 

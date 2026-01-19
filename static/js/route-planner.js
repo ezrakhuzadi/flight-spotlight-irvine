@@ -6,18 +6,24 @@
 (function (root) {
     'use strict';
 
-    const DEFAULTS = {
-        OSM_BUILDINGS_ASSET_ID: 96188,
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
+    const DEFAULTS = Object.assign({
+        OSM_BUILDINGS_ASSET_ID: Number(CesiumConfig.osmBuildingsAssetId) || 96188,
         FAA_MAX_ALTITUDE_AGL_M: 121,
         DEFAULT_SAFETY_BUFFER_M: 20,
         DEFAULT_SAMPLE_SPACING_M: 5,
         MIN_SAMPLE_SPACING_M: 5,
         MAX_SAMPLE_SPACING_M: 30,
         TARGET_STEP_COUNT: 320,
-        FAN_OFFSETS: [-90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90],
+        DEFAULT_LANE_RADIUS_M: 90,
+        MAX_LANE_RADIUS_M: 240,
+        LANE_SPACING_M: 15,
+        LANE_EXPANSION_STEP_M: 60,
+        FAN_OFFSETS: null,
         TILESET_LOAD_TIMEOUT_MS: 15000,
         TILESET_POLL_INTERVAL_MS: 200
-    };
+    }, window.__ROUTE_PLANNER_CONFIG__ || {});
 
     const state = {
         viewer: null,
@@ -53,6 +59,22 @@
         if (!distance) return config.DEFAULT_SAMPLE_SPACING_M;
         const spacing = distance / config.TARGET_STEP_COUNT;
         return Math.min(config.MAX_SAMPLE_SPACING_M, Math.max(config.MIN_SAMPLE_SPACING_M, spacing));
+    }
+
+    function buildLaneOffsets(radiusMeters, spacingMeters) {
+        const steps = Math.max(1, Math.floor(radiusMeters / spacingMeters));
+        const offsets = [];
+        for (let i = -steps; i <= steps; i += 1) {
+            offsets.push(i * spacingMeters);
+        }
+        return offsets;
+    }
+
+    function resolveLaneOffsets(config, radiusMeters) {
+        if (Array.isArray(config.FAN_OFFSETS) && config.FAN_OFFSETS.length) {
+            return config.FAN_OFFSETS;
+        }
+        return buildLaneOffsets(radiusMeters, config.LANE_SPACING_M);
     }
 
     function normalizeWaypoints(waypoints, defaultAlt) {
@@ -101,10 +123,13 @@
         return false;
     }
 
-    function generateGridSamples(waypoints, spacingMeters, config) {
+    function generateGridSamples(waypoints, spacingMeters, config, laneOffsets) {
         if (waypoints.length < 2) return null;
 
-        const lanes = config.FAN_OFFSETS.map(() => []);
+        const offsets = Array.isArray(laneOffsets) && laneOffsets.length
+            ? laneOffsets
+            : resolveLaneOffsets(config, config.DEFAULT_LANE_RADIUS_M);
+        const lanes = offsets.map(() => []);
         const centerLine = [];
         const waypointIndices = [0];
         let totalSteps = 0;
@@ -136,7 +161,7 @@
                     alt: alt
                 });
 
-                config.FAN_OFFSETS.forEach((offset, laneIdx) => {
+                offsets.forEach((offset, laneIdx) => {
                     if (offset === 0) {
                         lanes[laneIdx].push({
                             lat: Cesium.Math.toDegrees(centerPoint.latitude),
@@ -361,80 +386,143 @@
         const plannedAltitude = Number.isFinite(config.plannedAltitude)
             ? config.plannedAltitude
             : normalized.reduce((sum, wp) => sum + wp.alt, 0) / normalized.length;
+        const geofences = Array.isArray(config.geofences) ? config.geofences : [];
 
         await loadOsmBuildings(config);
         await focusCameraOnRoute(normalized);
 
         const spacing = resolveSampleSpacing(normalized, config);
-        const grid = generateGridSamples(normalized, spacing, config);
-        const analysis = await analyzeGrid(grid, config);
-        if (!analysis) {
-            return {
-                waypoints: normalized,
-                samplePoints: 0,
-                plannedAltitude,
-                analysis: { points: [], maxObstacleHeight: 0, maxBuildingHeight: 0 },
-                validation: { isValid: false, violations: [], summary: 'Route analysis failed' },
-                optimized: false,
-                timestamp: new Date().toISOString()
+        let laneRadius = config.DEFAULT_LANE_RADIUS_M;
+        const maxRadius = Math.max(laneRadius, config.MAX_LANE_RADIUS_M);
+        const maxAttempts = Math.max(
+            1,
+            Math.ceil((maxRadius - laneRadius) / config.LANE_EXPANSION_STEP_M) + 1
+        );
+        let attempt = 0;
+        let result = null;
+        let lastGrid = null;
+        let lastAnalysis = null;
+        let lastValidation = null;
+
+        while (attempt < maxAttempts && !result) {
+            const laneOffsets = resolveLaneOffsets(config, laneRadius);
+            const grid = generateGridSamples(normalized, spacing, config, laneOffsets);
+            const analysis = await analyzeGrid(grid, config);
+            lastGrid = grid;
+            lastAnalysis = analysis;
+            if (!analysis) {
+                result = {
+                    waypoints: normalized,
+                    samplePoints: 0,
+                    plannedAltitude,
+                    analysis: { points: [], maxObstacleHeight: 0, maxBuildingHeight: 0 },
+                    validation: { isValid: false, violations: [], summary: 'Route analysis failed' },
+                    optimized: false,
+                    timestamp: new Date().toISOString()
+                };
+                break;
+            }
+
+            const centerLaneIdx = Math.floor(grid.lanes.length / 2);
+            const centerLanePoints = grid.lanes[centerLaneIdx];
+            const centerAnalysis = {
+                points: centerLanePoints.map((point) => ({
+                    ...point,
+                    obstacleHeight: point.obstacleHeight,
+                    terrainHeight: point.terrainHeight,
+                    buildingHeight: point.buildingHeight || 0
+                })),
+                maxObstacleHeight: analysis.maxObstacleHeight,
+                maxBuildingHeight: analysis.maxBuildingHeight || 0
             };
-        }
 
-        const centerLaneIdx = Math.floor(grid.lanes.length / 2);
-        const centerLanePoints = grid.lanes[centerLaneIdx];
-        const centerAnalysis = {
-            points: centerLanePoints.map((point) => ({
-                ...point,
-                obstacleHeight: point.obstacleHeight,
-                terrainHeight: point.terrainHeight,
-                buildingHeight: point.buildingHeight || 0
-            })),
-            maxObstacleHeight: analysis.maxObstacleHeight,
-            maxBuildingHeight: analysis.maxBuildingHeight || 0
-        };
+            const straightValidation = validateFAA(centerAnalysis, plannedAltitude, config);
+            lastValidation = straightValidation;
 
-        const straightValidation = validateFAA(centerAnalysis, plannedAltitude, config);
+            if (straightValidation.isValid) {
+                result = {
+                    waypoints: normalized,
+                    samplePoints: grid.lanes[0].length * grid.lanes.length,
+                    plannedAltitude,
+                    analysis: centerAnalysis,
+                    validation: straightValidation,
+                    optimized: false,
+                    timestamp: new Date().toISOString()
+                };
+                break;
+            }
 
-        if (straightValidation.isValid) {
-            return {
-                waypoints: normalized,
+            if (!root.RouteEngine) {
+                result = {
+                    waypoints: normalized,
+                    samplePoints: grid.lanes[0].length * grid.lanes.length,
+                    plannedAltitude,
+                    analysis: centerAnalysis,
+                    validation: straightValidation,
+                    optimized: false,
+                    timestamp: new Date().toISOString(),
+                    warning: 'Route engine unavailable'
+                };
+                break;
+            }
+
+            if (typeof root.RouteEngine.configure === 'function') {
+                root.RouteEngine.configure({
+                    FAA_LIMIT_AGL: config.FAA_MAX_ALTITUDE_AGL_M,
+                    SAFETY_BUFFER_M: config.DEFAULT_SAFETY_BUFFER_M
+                });
+            }
+
+            const optimization = root.RouteEngine.optimizeFlightPath(normalized, grid, geofences);
+            if (!optimization.success) {
+                attempt += 1;
+                const nextRadius = Math.min(maxRadius, laneRadius + config.LANE_EXPANSION_STEP_M);
+                if (nextRadius <= laneRadius) {
+                    break;
+                }
+                laneRadius = nextRadius;
+                continue;
+            }
+
+            const validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
+                optimization.waypoints,
+                state.viewer
+            );
+
+            result = {
+                waypoints: validatedWaypoints,
+                originalWaypoints: normalized,
                 samplePoints: grid.lanes[0].length * grid.lanes.length,
-                plannedAltitude,
-                analysis: centerAnalysis,
-                validation: straightValidation,
-                optimized: false,
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        if (!root.RouteEngine) {
-            return {
-                waypoints: normalized,
-                samplePoints: grid.lanes[0].length * grid.lanes.length,
-                plannedAltitude,
-                analysis: centerAnalysis,
-                validation: straightValidation,
-                optimized: false,
-                timestamp: new Date().toISOString(),
-                warning: 'Route engine unavailable'
-            };
-        }
-
-        if (typeof root.RouteEngine.configure === 'function') {
-            root.RouteEngine.configure({
-                FAA_LIMIT_AGL: config.FAA_MAX_ALTITUDE_AGL_M,
-                SAFETY_BUFFER_M: config.DEFAULT_SAFETY_BUFFER_M
-            });
-        }
-
-        const optimization = root.RouteEngine.optimizeFlightPath(normalized, grid);
-        if (!optimization.success) {
-            return {
-                waypoints: normalized,
-                samplePoints: grid.lanes[0].length * grid.lanes.length,
-                plannedAltitude,
+                optimizedPoints: validatedWaypoints.length,
+                plannedAltitude: plannedAltitude,
                 analysis: centerAnalysis,
                 validation: {
+                    isValid: true,
+                    violations: [],
+                    suggestedAltitude: 0,
+                    suggestedAGL: 0,
+                    maxObstacleHeight: analysis.maxObstacleHeight,
+                    maxBuildingHeight: analysis.maxBuildingHeight || 0,
+                    faaCompliant: true,
+                    summary: `Optimized path with ${optimization.nodesVisited} nodes visited`
+                },
+                optimized: true,
+                optimization,
+                timestamp: new Date().toISOString()
+            };
+            break;
+        }
+
+        if (!result) {
+            const samplePoints = lastGrid && lastGrid.lanes.length
+                ? lastGrid.lanes[0].length * lastGrid.lanes.length
+                : 0;
+            result = {
+                waypoints: normalized,
+                samplePoints,
+                plannedAltitude,
+                analysis: lastAnalysis || { points: [], maxObstacleHeight: 0, maxBuildingHeight: 0 },
+                validation: lastValidation || {
                     isValid: false,
                     violations: [],
                     summary: 'No valid path found'
@@ -444,41 +532,26 @@
             };
         }
 
-        const validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
-            optimization.waypoints,
-            state.viewer
-        );
-
-        return {
-            waypoints: validatedWaypoints,
-            originalWaypoints: normalized,
-            samplePoints: grid.lanes[0].length * grid.lanes.length,
-            optimizedPoints: validatedWaypoints.length,
-            plannedAltitude: plannedAltitude,
-            analysis: centerAnalysis,
-            validation: {
-                isValid: true,
-                violations: [],
-                suggestedAltitude: 0,
-                suggestedAGL: 0,
-                maxObstacleHeight: analysis.maxObstacleHeight,
-                maxBuildingHeight: analysis.maxBuildingHeight || 0,
-                faaCompliant: true,
-                summary: `Optimized path with ${optimization.nodesVisited} nodes visited`
-            },
-            optimized: true,
-            optimization,
-            timestamp: new Date().toISOString()
-        };
+        return result;
     }
 
     async function init(viewer, options = {}) {
         state.viewer = viewer;
-        const config = { ...DEFAULTS, ...options };
-        if (options.loadBuildings === false) {
+        const {
+            osmTileset,
+            loadBuildings = true,
+            ...configOverrides
+        } = options || {};
+        if (osmTileset) {
+            state.osmTileset = osmTileset;
+        }
+        const config = { ...DEFAULTS, ...configOverrides };
+        if (loadBuildings === false) {
             return { viewer };
         }
-        await loadOsmBuildings(config);
+        if (!state.osmTileset) {
+            await loadOsmBuildings(config);
+        }
         return { viewer };
     }
 

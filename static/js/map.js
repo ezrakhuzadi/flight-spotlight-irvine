@@ -14,15 +14,19 @@
     // Configuration
     // ========================================================================
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
         ATC_SERVER_URL: window.__ATC_API_BASE__ || 'http://localhost:3000',
         ATC_WS_BASE: window.__ATC_WS_BASE__ || '',
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        ATC_WS_TOKEN: window.__ATC_WS_TOKEN__ || '',
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2000 },
         MAX_TRAIL_POINTS: 60,
         HEADING_ARROW_LENGTH_M: 100,
         WS_RETRY_MS: 5000,
+        SHOW_EXTERNAL_TRAFFIC: true,
         REFRESH_INTERVALS: {
             drones: 1000,
             conflicts: 2000,
@@ -465,9 +469,33 @@
 
     function appendWsPath(base) {
         if (!base) return '';
-        if (base.includes('/v1/ws')) return base;
-        if (base.endsWith('/')) return `${base}v1/ws`;
-        return `${base}/v1/ws`;
+        let url;
+        try {
+            url = new URL(base);
+        } catch (error) {
+            console.warn('[Map] Invalid WS base URL:', error);
+            return '';
+        }
+
+        if (!url.pathname.includes('/v1/ws')) {
+            if (url.pathname.endsWith('/')) {
+                url.pathname = `${url.pathname}v1/ws`;
+            } else if (url.pathname === '') {
+                url.pathname = '/v1/ws';
+            } else {
+                url.pathname = `${url.pathname}/v1/ws`;
+            }
+        }
+
+        const ownerId = getOwnerFilterId();
+        if (ownerId && !url.searchParams.has('owner_id')) {
+            url.searchParams.set('owner_id', ownerId);
+        }
+        if (CONFIG.ATC_WS_TOKEN && !url.searchParams.has('token')) {
+            url.searchParams.set('token', CONFIG.ATC_WS_TOKEN);
+        }
+
+        return url.toString();
     }
 
     function getOwnerFilterId() {
@@ -502,7 +530,8 @@
             const ownerId = getOwnerFilterId();
             if (ownerId) {
                 params.set('owner_id', ownerId);
-            } else {
+            }
+            if (CONFIG.SHOW_EXTERNAL_TRAFFIC) {
                 params.set('include_external', 'true');
             }
             const endpoint = `/v1/traffic${params.toString() ? `?${params.toString()}` : ''}`;

@@ -9,7 +9,6 @@
   const fs = require("fs");
   const bcrypt = require("bcryptjs");
   const axios = require("axios");
-  const { socketConnection } = require("./util/io");
   const { initUserStore } = require("./util/user-store");
   const { requireAuth, requireRole } = require("./util/auth");
   require("dotenv").config();
@@ -21,12 +20,21 @@
   const ATC_URL = process.env.ATC_SERVER_URL || "http://host.docker.internal:3000";
   const ATC_PROXY_BASE = process.env.ATC_PROXY_BASE || "/api/atc";
   const ATC_WS_URL = process.env.ATC_WS_URL || "";
+  const ATC_WS_TOKEN = process.env.ATC_WS_TOKEN || "";
+  const ATC_REGISTRATION_TOKEN = process.env.ATC_REGISTRATION_TOKEN || "";
   const BLENDER_AUDIENCE = process.env.PASSPORT_AUDIENCE || "testflight.flightblender.com";
   const BLENDER_AUTH_TOKEN = process.env.BLENDER_AUTH_TOKEN || "";
+  const DEMO_MODE = process.env.DEMO_MODE === "1";
   const PASSWORD_ALGO = "bcrypt";
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
+  const ALLOW_DEFAULT_USERS = process.env.ATC_ALLOW_DEFAULT_USERS === "1";
+  const CESIUM_ION_TOKEN = process.env.CESIUM_ION_TOKEN || "";
+  const GOOGLE_3D_TILES_ASSET_ID = Number(process.env.GOOGLE_3D_TILES_ASSET_ID);
+  const OSM_BUILDINGS_ASSET_ID = Number(process.env.OSM_BUILDINGS_ASSET_ID);
+  const ROUTE_ENGINE_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_ENGINE_CONFIG, "ATC_ROUTE_ENGINE_CONFIG");
+  const ROUTE_PLANNER_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_PLANNER_CONFIG, "ATC_ROUTE_PLANNER_CONFIG");
 
-  const COMPLIANCE_LIMITS = {
+  const DEFAULT_COMPLIANCE_LIMITS = {
     maxWindMps: 12,
     maxGustMps: 15,
     maxPrecipMm: 2,
@@ -37,18 +45,54 @@
     populationAbsoluteMax: 4000,
     defaultClearanceM: 60
   };
+  let COMPLIANCE_LIMITS = { ...DEFAULT_COMPLIANCE_LIMITS };
+  const COMPLIANCE_LIMITS_REFRESH_MS = 5 * 60 * 1000;
+  let complianceLimitsLastFetched = 0;
 
-  const HAZARDS = [
-    { id: "tower-1", name: "Campus Tower", lat: 33.6459, lon: -117.8422, radiusM: 80 },
-    { id: "power-1", name: "Power Corridor", lat: 33.6835, lon: -117.8302, radiusM: 120 },
-    { id: "hospital-1", name: "Helipad Zone", lat: 33.6431, lon: -117.8455, radiusM: 150 },
-    { id: "stadium-1", name: "Stadium Complex", lat: 33.6505, lon: -117.8372, radiusM: 180 }
-  ];
+  function toNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
 
-  const OVERPASS_URL = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
-  const POPULATION_PER_BUILDING = Number(process.env.POPULATION_PER_BUILDING || 2.4);
-  const MAX_OVERPASS_ELEMENTS = Number(process.env.MAX_OVERPASS_ELEMENTS || 3000);
-  const MAX_OBSTACLES_RESPONSE = Number(process.env.MAX_OBSTACLES_RESPONSE || 200);
+  function normalizeComplianceLimits(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    return {
+      maxWindMps: toNumber(payload.maxWindMps) ?? DEFAULT_COMPLIANCE_LIMITS.maxWindMps,
+      maxGustMps: toNumber(payload.maxGustMps) ?? DEFAULT_COMPLIANCE_LIMITS.maxGustMps,
+      maxPrecipMm: toNumber(payload.maxPrecipMm) ?? DEFAULT_COMPLIANCE_LIMITS.maxPrecipMm,
+      windWarnRatio: toNumber(payload.windWarnRatio) ?? DEFAULT_COMPLIANCE_LIMITS.windWarnRatio,
+      batteryWarnMarginMin: toNumber(payload.batteryWarnMarginMin) ?? DEFAULT_COMPLIANCE_LIMITS.batteryWarnMarginMin,
+      populationBvlosMax: toNumber(payload.populationBvlosMax) ?? DEFAULT_COMPLIANCE_LIMITS.populationBvlosMax,
+      populationWarn: toNumber(payload.populationWarn) ?? DEFAULT_COMPLIANCE_LIMITS.populationWarn,
+      populationAbsoluteMax: toNumber(payload.populationAbsoluteMax) ?? DEFAULT_COMPLIANCE_LIMITS.populationAbsoluteMax,
+      defaultClearanceM: toNumber(payload.defaultClearanceM) ?? DEFAULT_COMPLIANCE_LIMITS.defaultClearanceM
+    };
+  }
+
+  async function refreshComplianceLimits(force = false) {
+    const now = Date.now();
+    if (!force && now - complianceLimitsLastFetched < COMPLIANCE_LIMITS_REFRESH_MS) {
+      return COMPLIANCE_LIMITS;
+    }
+    try {
+      const response = await axios.get(`${ATC_URL}/v1/compliance/limits`, {
+        timeout: 2500,
+        validateStatus: () => true
+      });
+      if (response.status === 200) {
+        const normalized = normalizeComplianceLimits(response.data);
+        if (normalized) {
+          COMPLIANCE_LIMITS = normalized;
+          complianceLimitsLastFetched = now;
+        }
+      }
+    } catch (error) {
+      if (force) {
+        console.warn("[Compliance] Failed to sync limits from ATC:", error.message);
+      }
+    }
+    return COMPLIANCE_LIMITS;
+  }
 
   // Hash password helper
   function hashPassword(password) {
@@ -74,6 +118,51 @@
     user.passwordHash = upgraded;
     user.passwordAlgo = PASSWORD_ALGO;
     return true;
+  }
+
+  function cleanEnv(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function parseJsonConfig(value, label) {
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      console.warn(`[CONFIG] ${label} is not valid JSON:`, error.message);
+      return null;
+    }
+  }
+
+  function buildSeedUser(prefix, fallback) {
+    const email = cleanEnv(process.env[`${prefix}_EMAIL`]);
+    const password = cleanEnv(process.env[`${prefix}_PASSWORD`]);
+    const hasExplicit = Boolean(email && password);
+
+    if (!hasExplicit && !ALLOW_DEFAULT_USERS) {
+      return null;
+    }
+
+    if (!hasExplicit) {
+      return fallback;
+    }
+
+    const id = cleanEnv(process.env[`${prefix}_ID`]) || email.split("@")[0];
+    const name = cleanEnv(process.env[`${prefix}_NAME`]) || fallback.name;
+    const role = cleanEnv(process.env[`${prefix}_ROLE`]) || fallback.role;
+
+    if (!id) {
+      console.warn(`[AUTH] ${prefix}_ID missing; cannot seed user.`);
+      return null;
+    }
+
+    return {
+      id,
+      name,
+      email,
+      password,
+      role
+    };
   }
 
   function base64UrlEncode(value) {
@@ -160,9 +249,45 @@
   }
 
   const userStore = initUserStore();
-  userStore.ensureDefaults(hashPassword, PASSWORD_ALGO);
+  await refreshComplianceLimits(true);
+  setInterval(() => {
+    refreshComplianceLimits().catch((error) => {
+      console.warn("[Compliance] Limit refresh failed:", error.message);
+    });
+  }, COMPLIANCE_LIMITS_REFRESH_MS).unref();
+
+  const seedUsers = [];
+  const adminSeed = buildSeedUser("ATC_BOOTSTRAP_ADMIN", {
+    id: "admin",
+    name: "Admin",
+    email: "admin@example.com",
+    password: "admin123",
+    role: "admin"
+  });
+  if (adminSeed) seedUsers.push(adminSeed);
+
+  const guestSeed = buildSeedUser("ATC_BOOTSTRAP_GUEST", {
+    id: "guest",
+    name: "Guest",
+    email: "guest@example.com",
+    password: "guest123",
+    role: "viewer"
+  });
+  if (guestSeed) seedUsers.push(guestSeed);
+
+  if (seedUsers.length === 0 && !ALLOW_DEFAULT_USERS) {
+    console.warn("[AUTH] No bootstrap users configured; set ATC_BOOTSTRAP_ADMIN_EMAIL and ATC_BOOTSTRAP_ADMIN_PASSWORD.");
+  } else if (ALLOW_DEFAULT_USERS) {
+    console.warn("[AUTH] ATC_ALLOW_DEFAULT_USERS enabled; default accounts are seeded for dev only.");
+  }
+
+  userStore.ensureDefaults(hashPassword, PASSWORD_ALGO, seedUsers);
 
   let app = express();
+
+  // Provide defaults even if a render bypasses res.locals middleware.
+  app.locals.routeEngineConfig = ROUTE_ENGINE_CONFIG || {};
+  app.locals.routePlannerConfig = ROUTE_PLANNER_CONFIG || {};
 
   app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.url}`);
@@ -178,12 +303,18 @@
   // Session middleware
   const sessionPath = process.env.SESSION_STORE_PATH || path.join(__dirname, "data", "sessions");
   fs.mkdirSync(sessionPath, { recursive: true });
+  const rawSessionSecret = cleanEnv(process.env.SESSION_SECRET);
+  if (!rawSessionSecret && process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET must be set in production.");
+  }
+  const sessionSecret = rawSessionSecret || crypto.randomBytes(32).toString("hex");
+
   app.use(session({
     store: new FileStore({
       path: sessionPath,
       logFn: () => {}
     }),
-    secret: process.env.SESSION_SECRET || "atc-drone-dev-secret-change-in-prod",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -197,6 +328,18 @@
     res.locals.user = req.session.user || null;
     res.locals.atcApiBase = ATC_PROXY_BASE;
     res.locals.atcWsBase = ATC_WS_URL;
+    res.locals.atcWsToken = ATC_WS_TOKEN;
+    res.locals.demoMode = DEMO_MODE;
+    res.locals.cesiumIonToken = CESIUM_ION_TOKEN;
+    res.locals.complianceLimits = COMPLIANCE_LIMITS;
+    res.locals.routeEngineConfig = ROUTE_ENGINE_CONFIG || {};
+    res.locals.routePlannerConfig = ROUTE_PLANNER_CONFIG || {};
+    res.locals.google3dTilesAssetId = Number.isFinite(GOOGLE_3D_TILES_ASSET_ID)
+      ? GOOGLE_3D_TILES_ASSET_ID
+      : null;
+    res.locals.osmBuildingsAssetId = Number.isFinite(OSM_BUILDINGS_ASSET_ID)
+      ? OSM_BUILDINGS_ASSET_ID
+      : null;
     next();
   });
 
@@ -485,6 +628,9 @@
   });
 
   app.post("/api/rid/demo", requireRole("authority"), async (req, res) => {
+    if (!DEMO_MODE) {
+      return res.status(404).json({ message: "not_found" });
+    }
     try {
       const { testId, injectionId, payload } = buildDemoRidPayload(req.body?.center, req.body?.subscription_id);
       const token = createDevJwt(["rid.inject_test_data"]);
@@ -505,163 +651,6 @@
     } catch (error) {
       console.error("[RID Proxy] Demo injection error:", error.message);
       res.status(502).json({ message: "Failed to inject demo RID traffic" });
-    }
-  });
-
-  app.get("/api/compliance/weather", requireAuth, async (req, res) => {
-    const lat = Number(req.query.lat);
-    const lon = Number(req.query.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      return res.status(400).json({ message: "lat and lon query params are required" });
-    }
-
-    try {
-      const response = await axios.get("https://api.open-meteo.com/v1/forecast", {
-        params: {
-          latitude: lat,
-          longitude: lon,
-          current: "temperature_2m,wind_speed_10m,wind_gusts_10m,precipitation,weather_code",
-          windspeed_unit: "ms",
-          timezone: "UTC"
-        },
-        timeout: 8000
-      });
-      res.status(200).json(response.data);
-    } catch (error) {
-      console.error("[Compliance] Weather error:", error.message);
-      res.status(502).json({ message: "Failed to reach weather provider" });
-    }
-  });
-
-  app.post("/api/compliance/analyze", requireAuth, async (req, res) => {
-    const points = Array.isArray(req.body?.points) ? req.body.points : [];
-    if (!points.length) {
-      return res.status(400).json({ message: "points array required" });
-    }
-
-    const baseBounds = computeBounds(points);
-    if (!baseBounds) {
-      return res.status(400).json({ message: "invalid route points" });
-    }
-
-    const clearanceM = toNumber(req.body?.clearance_m) ?? COMPLIANCE_LIMITS.defaultClearanceM;
-    const bounds = expandBounds(baseBounds);
-    const areaKm2 = boundsAreaKm2(bounds);
-    const bbox = `${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon}`;
-
-    const query = `
-      [out:json][timeout:25];
-      (
-        node["man_made"~"tower|mast|chimney"](${bbox});
-        node["power"="tower"](${bbox});
-        node["aeroway"~"helipad|heliport"](${bbox});
-        way["man_made"~"tower|mast|chimney"](${bbox});
-        way["power"="tower"](${bbox});
-        way["aeroway"~"helipad|heliport"](${bbox});
-        way["building"](${bbox});
-      );
-      out center tags;
-    `;
-
-    try {
-      const response = await axios.post(OVERPASS_URL, query, {
-        headers: { "Content-Type": "text/plain" },
-        timeout: 15000,
-        maxContentLength: 2 * 1024 * 1024
-      });
-
-      const elements = Array.isArray(response.data?.elements) ? response.data.elements : [];
-      const truncated = elements.length > MAX_OVERPASS_ELEMENTS;
-      const sample = truncated ? elements.slice(0, MAX_OVERPASS_ELEMENTS) : elements;
-
-      let buildingCount = 0;
-      const obstacles = [];
-      const seen = new Set();
-      const maxDistance = Math.max(400, clearanceM * 4);
-
-      sample.forEach((element) => {
-        const tags = element.tags || {};
-        const center = elementCenter(element);
-        if (!center) return;
-
-        const isBuilding = !!tags.building;
-        if (isBuilding) buildingCount += 1;
-
-        const manMade = typeof tags.man_made === "string" ? tags.man_made : null;
-        const aeroway = typeof tags.aeroway === "string" ? tags.aeroway : null;
-        const power = typeof tags.power === "string" ? tags.power : null;
-        const levels = toNumber(tags["building:levels"]);
-        const heightM = parseHeight(tags.height)
-          ?? parseHeight(tags["height:roof"])
-          ?? (Number.isFinite(levels) ? levels * 3 : null);
-
-        const isTower = manMade && ["tower", "mast", "chimney"].includes(manMade);
-        const isPowerTower = power === "tower";
-        const isHelipad = aeroway === "helipad" || aeroway === "heliport";
-        const isTallBuilding = isBuilding && heightM !== null && heightM >= Math.max(20, clearanceM);
-
-        const obstacleType = isTower
-          ? manMade
-          : isPowerTower
-            ? "power_tower"
-            : isHelipad
-              ? aeroway
-              : isTallBuilding
-                ? "tall_building"
-                : null;
-
-        if (!obstacleType) return;
-
-        const distanceM = distanceToRouteMeters(center, points);
-        if (Number.isFinite(distanceM) && distanceM > maxDistance) {
-          return;
-        }
-
-        const baseRadius = Math.max(clearanceM, 50);
-        const radiusM = heightM
-          ? Math.max(baseRadius, Math.min(200, heightM * 1.2))
-          : baseRadius;
-
-        const key = `${obstacleType}:${center.lat.toFixed(5)}:${center.lon.toFixed(5)}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-
-        obstacles.push({
-          id: `${obstacleType}-${element.id}`,
-          name: tags.name || obstacleType.replace(/_/g, " "),
-          lat: center.lat,
-          lon: center.lon,
-          heightM,
-          radiusM,
-          type: obstacleType,
-          source: "OpenStreetMap",
-          distanceM
-        });
-      });
-
-      obstacles.sort((a, b) => (a.distanceM ?? 0) - (b.distanceM ?? 0));
-      const trimmedObstacles = obstacles.slice(0, MAX_OBSTACLES_RESPONSE);
-
-      const estimatedPopulation = Math.round(buildingCount * POPULATION_PER_BUILDING);
-      const density = areaKm2 > 0 ? estimatedPopulation / areaKm2 : 0;
-
-      res.status(200).json({
-        bounds,
-        area_km2: areaKm2,
-        population: {
-          density,
-          classification: classifyDensity(density),
-          building_count: buildingCount,
-          estimated_population: estimatedPopulation,
-          source: "OpenStreetMap"
-        },
-        obstacles: trimmedObstacles,
-        obstacle_count: obstacles.length,
-        truncated
-      });
-    } catch (error) {
-      console.error("[Compliance] Overpass error:", error.message);
-      res.status(502).json({ message: "Failed to reach OSM provider" });
     }
   });
 
@@ -769,15 +758,20 @@
     const data = ["POST", "PUT", "PATCH", "DELETE"].includes(method) ? req.body : undefined;
 
     try {
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      if (requestPath === "/v1/drones/register" && ATC_REGISTRATION_TOKEN) {
+        headers["X-Registration-Token"] = ATC_REGISTRATION_TOKEN;
+      }
+
       const response = await axios({
         method,
         url,
         data,
         timeout: 10000,
         validateStatus: () => true,
-        headers: {
-          "Content-Type": "application/json"
-        }
+        headers
       });
 
       if (typeof response.data === "object") {
@@ -793,368 +787,6 @@
   // ========================================
   // Flight Declaration proxy (Mission Planning)
   // ========================================
-
-  function extractCompliance(payload) {
-    if (!payload) return null;
-    const geo = extractGeoJson(payload);
-    if (!geo) return null;
-    const feature = geo?.features?.[0];
-    return feature?.properties?.compliance || null;
-  }
-
-  function extractGeoJson(payload) {
-    if (!payload) return null;
-    let geo = payload.flight_declaration_geo_json || payload.flight_declaration_geojson;
-    if (!geo) return null;
-    if (typeof geo === "string") {
-      try {
-        geo = JSON.parse(geo);
-        payload.flight_declaration_geo_json = geo;
-      } catch (error) {
-        return null;
-      }
-    }
-    return geo;
-  }
-
-  function extractRoutePoints(geo) {
-    if (!geo || !Array.isArray(geo.features)) return [];
-    const points = [];
-    geo.features.forEach((feature) => {
-      const geometry = feature?.geometry;
-      if (!geometry) return;
-      const { type, coordinates } = geometry;
-      if (!coordinates) return;
-      if (type === "Point") {
-        points.push({ lon: coordinates[0], lat: coordinates[1] });
-      } else if (type === "LineString") {
-        coordinates.forEach((coord) => points.push({ lon: coord[0], lat: coord[1] }));
-      } else if (type === "Polygon") {
-        (coordinates[0] || []).forEach((coord) => points.push({ lon: coord[0], lat: coord[1] }));
-      } else if (type === "MultiLineString") {
-        (coordinates[0] || []).forEach((coord) => points.push({ lon: coord[0], lat: coord[1] }));
-      } else if (type === "MultiPolygon") {
-        const ring = coordinates?.[0]?.[0] || [];
-        ring.forEach((coord) => points.push({ lon: coord[0], lat: coord[1] }));
-      }
-    });
-    return points;
-  }
-
-  function computeBounds(points) {
-    if (!Array.isArray(points) || points.length === 0) return null;
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-    let minLon = Infinity;
-    let maxLon = -Infinity;
-    points.forEach((point) => {
-      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
-      minLat = Math.min(minLat, point.lat);
-      maxLat = Math.max(maxLat, point.lat);
-      minLon = Math.min(minLon, point.lon);
-      maxLon = Math.max(maxLon, point.lon);
-    });
-    if (!Number.isFinite(minLat) || !Number.isFinite(minLon)) return null;
-    return { minLat, maxLat, minLon, maxLon };
-  }
-
-  function expandBounds(bounds) {
-    if (!bounds) return null;
-    const latSpan = bounds.maxLat - bounds.minLat;
-    const lonSpan = bounds.maxLon - bounds.minLon;
-    const padLat = Math.max(latSpan * 0.3, 0.002);
-    const padLon = Math.max(lonSpan * 0.3, 0.002);
-    return {
-      minLat: bounds.minLat - padLat,
-      maxLat: bounds.maxLat + padLat,
-      minLon: bounds.minLon - padLon,
-      maxLon: bounds.maxLon + padLon
-    };
-  }
-
-  function boundsAreaKm2(bounds) {
-    if (!bounds) return 0;
-    const meanLat = ((bounds.minLat + bounds.maxLat) / 2) * Math.PI / 180;
-    const metersPerDegLat = 111320;
-    const metersPerDegLon = 111320 * Math.cos(meanLat);
-    const widthM = Math.max(0, (bounds.maxLon - bounds.minLon) * metersPerDegLon);
-    const heightM = Math.max(0, (bounds.maxLat - bounds.minLat) * metersPerDegLat);
-    const areaKm2 = (widthM * heightM) / 1e6;
-    return Math.max(areaKm2, 0.15);
-  }
-
-  function parseHeight(value) {
-    if (!value) return null;
-    const match = String(value).match(/[\d.]+/);
-    if (!match) return null;
-    const height = Number(match[0]);
-    return Number.isFinite(height) ? height : null;
-  }
-
-  function elementCenter(element) {
-    if (Number.isFinite(element.lat) && Number.isFinite(element.lon)) {
-      return { lat: element.lat, lon: element.lon };
-    }
-    if (element.center && Number.isFinite(element.center.lat) && Number.isFinite(element.center.lon)) {
-      return { lat: element.center.lat, lon: element.center.lon };
-    }
-    return null;
-  }
-
-  function classifyDensity(density) {
-    if (!Number.isFinite(density)) return "unknown";
-    if (density < 200) return "rural";
-    if (density < 1000) return "suburban";
-    if (density < 2500) return "urban";
-    return "dense";
-  }
-
-  function toNumber(value) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
-  }
-
-  function haversineDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371000;
-    const phi1 = lat1 * Math.PI / 180;
-    const phi2 = lat2 * Math.PI / 180;
-    const dphi = (lat2 - lat1) * Math.PI / 180;
-    const dlambda = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dphi / 2) ** 2
-      + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dlambda / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  function computeRouteDistance(points) {
-    if (!Array.isArray(points) || points.length < 2) return 0;
-    let distance = 0;
-    for (let i = 1; i < points.length; i += 1) {
-      const prev = points[i - 1];
-      const next = points[i];
-      distance += haversineDistance(prev.lat, prev.lon, next.lat, next.lon);
-    }
-    return distance;
-  }
-
-  function distanceToRouteMeters(hazard, points) {
-    if (!Array.isArray(points) || points.length === 0) return Infinity;
-
-    const refLat = hazard.lat * Math.PI / 180;
-    const metersPerDegLat = 111320;
-    const metersPerDegLon = 111320 * Math.cos(refLat);
-
-    const toXY = (point) => ({
-      x: (point.lon - hazard.lon) * metersPerDegLon,
-      y: (point.lat - hazard.lat) * metersPerDegLat
-    });
-
-    let min = Infinity;
-    points.forEach((point) => {
-      const pos = toXY(point);
-      const dist = Math.hypot(pos.x, pos.y);
-      if (dist < min) min = dist;
-    });
-
-    for (let i = 1; i < points.length; i += 1) {
-      const a = toXY(points[i - 1]);
-      const b = toXY(points[i]);
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq === 0) continue;
-      let t = -(a.x * dx + a.y * dy) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-      const cx = a.x + t * dx;
-      const cy = a.y + t * dy;
-      const dist = Math.hypot(cx, cy);
-      if (dist < min) min = dist;
-    }
-
-    return min;
-  }
-
-  function summarizeStatus(checks) {
-    let hasWarn = false;
-    let hasPending = false;
-    let hasFail = false;
-
-    Object.values(checks).forEach((check) => {
-      if (check.status === "fail") hasFail = true;
-      if (check.status === "pending") hasPending = true;
-      if (check.status === "warn") hasWarn = true;
-    });
-
-    if (hasFail) return "fail";
-    if (hasPending) return "pending";
-    if (hasWarn) return "warn";
-    return "pass";
-  }
-
-  function evaluateWeatherCompliance(compliance) {
-    const weather = compliance?.checks?.weather || {};
-    const wind = toNumber(weather.windMps);
-    const gust = toNumber(weather.gustMps);
-    const precip = toNumber(weather.precipMm);
-    const maxWind = toNumber(weather.maxWindMps) ?? COMPLIANCE_LIMITS.maxWindMps;
-    const maxGust = toNumber(weather.maxGustMps) ?? COMPLIANCE_LIMITS.maxGustMps;
-    const maxPrecip = toNumber(weather.maxPrecipMm) ?? COMPLIANCE_LIMITS.maxPrecipMm;
-
-    if (wind === null || gust === null || precip === null) {
-      return { status: "pending", message: "Weather values missing" };
-    }
-
-    let status = "pass";
-    if (wind > maxWind || gust > maxGust || precip > maxPrecip) {
-      status = "fail";
-    } else if (
-      wind > maxWind * COMPLIANCE_LIMITS.windWarnRatio
-      || gust > maxGust * COMPLIANCE_LIMITS.windWarnRatio
-      || precip > maxPrecip * COMPLIANCE_LIMITS.windWarnRatio
-    ) {
-      status = "warn";
-    }
-
-    return {
-      status,
-      windMps: wind,
-      gustMps: gust,
-      precipMm: precip,
-      maxWindMps: maxWind,
-      maxGustMps: maxGust,
-      maxPrecipMm: maxPrecip
-    };
-  }
-
-  function evaluateBatteryCompliance(compliance, route) {
-    const battery = compliance?.checks?.battery || {};
-    const capacity = toNumber(battery.capacityMin);
-    const reserve = toNumber(battery.reserveMin);
-    const cruiseSpeed = toNumber(battery.cruiseSpeedMps);
-
-    if (!route || !route.hasRoute || capacity === null || reserve === null || cruiseSpeed === null || cruiseSpeed <= 0) {
-      return { status: "pending", message: "Battery inputs missing" };
-    }
-
-    const estimatedMinutes = route.distanceM / cruiseSpeed / 60;
-    const remaining = capacity - estimatedMinutes;
-    let status = "pass";
-    if (remaining < reserve) {
-      status = "fail";
-    } else if (remaining < reserve + COMPLIANCE_LIMITS.batteryWarnMarginMin) {
-      status = "warn";
-    }
-
-    return {
-      status,
-      estimatedMinutes,
-      capacityMin: capacity,
-      reserveMin: reserve,
-      remainingMin: remaining
-    };
-  }
-
-  function evaluatePopulationCompliance(compliance, payload) {
-    const population = compliance?.checks?.population || {};
-    const density = toNumber(population.density);
-    if (density === null) {
-      return { status: "pending", message: "Population density missing" };
-    }
-
-    const type = Number(payload?.type_of_operation || 1);
-    const isBvlos = type === 2;
-    let status = "pass";
-    if (density >= COMPLIANCE_LIMITS.populationAbsoluteMax) {
-      status = "fail";
-    } else if (isBvlos && density > COMPLIANCE_LIMITS.populationBvlosMax) {
-      status = "fail";
-    } else if (density >= COMPLIANCE_LIMITS.populationWarn) {
-      status = "warn";
-    }
-
-    return { status, density };
-  }
-
-  function evaluateObstacleCompliance(compliance, points) {
-    const obstacles = compliance?.checks?.obstacles || {};
-    const clearance = toNumber(obstacles.clearanceM) ?? COMPLIANCE_LIMITS.defaultClearanceM;
-
-    if (!points || points.length === 0) {
-      return { status: "pending", message: "Route missing", clearanceM: clearance };
-    }
-
-    const hazardList = Array.isArray(obstacles.hazards) && obstacles.hazards.length
-      ? obstacles.hazards
-      : HAZARDS;
-
-    const conflicts = [];
-    const warnings = [];
-    const warnBuffer = clearance * 1.5;
-
-    hazardList.forEach((hazard) => {
-      const radiusM = toNumber(hazard.radiusM) ?? toNumber(hazard.radius_m) ?? 0;
-      const distance = distanceToRouteMeters(hazard, points);
-      const conflictThreshold = (radiusM || 0) + clearance;
-      const warnThreshold = (radiusM || 0) + warnBuffer;
-      if (distance <= conflictThreshold) {
-        conflicts.push({ id: hazard.id, name: hazard.name, distanceM: distance });
-      } else if (distance <= warnThreshold) {
-        warnings.push({ id: hazard.id, name: hazard.name, distanceM: distance });
-      }
-    });
-
-    const status = conflicts.length ? "fail" : warnings.length ? "warn" : "pass";
-    return {
-      status,
-      clearanceM: clearance,
-      conflicts: conflicts.concat(warnings),
-      hazards: hazardList
-    };
-  }
-
-  function validateCompliance(compliance, payload) {
-    if (!compliance || typeof compliance !== "object") {
-      return { ok: false, message: "Compliance data missing" };
-    }
-
-    const overrideEnabled = !!compliance.override?.enabled;
-    const overrideNotes = (compliance.override?.notes || "").trim();
-    if (overrideEnabled && overrideNotes.length < 8) {
-      return { ok: false, message: "Override notes required", blocking: ["override"] };
-    }
-
-    const geo = extractGeoJson(payload);
-    const points = extractRoutePoints(geo);
-    const distanceM = computeRouteDistance(points);
-    const cruiseSpeed = toNumber(compliance?.checks?.battery?.cruiseSpeedMps) ?? 0;
-    const estimatedMinutes = cruiseSpeed > 0 ? distanceM / cruiseSpeed / 60 : 0;
-    const route = { distanceM, estimatedMinutes, hasRoute: points.length > 0 };
-
-    const checks = {
-      weather: evaluateWeatherCompliance(compliance),
-      battery: evaluateBatteryCompliance(compliance, route),
-      population: evaluatePopulationCompliance(compliance, payload),
-      obstacles: evaluateObstacleCompliance(compliance, points)
-    };
-
-    compliance.route = route;
-    compliance.checks = { ...compliance.checks, ...checks };
-    compliance.overall_status = summarizeStatus(checks);
-
-    const blocking = Object.entries(checks)
-      .filter(([, check]) => check.status === "fail" || check.status === "pending")
-      .map(([key]) => key);
-
-    if (blocking.length && !overrideEnabled) {
-      return {
-        ok: false,
-        message: "Compliance checks failed",
-        blocking
-      };
-    }
-
-    return { ok: true };
-  }
 
   app.get("/api/blender/flight-declarations", requireAuth, async (req, res) => {
     try {
@@ -1231,15 +863,6 @@
         req.body.submitted_by = req.session.user?.email || req.body.submitted_by;
       }
     }
-    const compliance = extractCompliance(req.body);
-    const complianceResult = validateCompliance(compliance, req.body);
-    if (!complianceResult.ok) {
-      return res.status(400).json({
-        message: complianceResult.message,
-        blocking_checks: complianceResult.blocking || []
-      });
-    }
-
     try {
       const token = createDevJwt(["flightblender.write"]);
       const response = await axios.post(
@@ -1257,6 +880,53 @@
       res.status(response.status).json(parseBlenderPayload(response.data));
     } catch (error) {
       console.error("[Blender Proxy] Flight declaration submit error:", error.message);
+      res.status(502).json({ message: "Failed to reach Flight Blender" });
+    }
+  });
+
+  app.delete("/api/blender/flight-declarations/:id", requireAuth, async (req, res) => {
+    const declarationId = req.params.id;
+    if (!declarationId) {
+      return res.status(400).json({ message: "declaration_id_required" });
+    }
+
+    try {
+      if (!isAuthority(req)) {
+        const token = createDevJwt(["flightblender.read"]);
+        const detail = await axios.get(
+          `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+            validateStatus: () => true
+          }
+        );
+        if (detail.status >= 400) {
+          return res.status(detail.status).json(parseBlenderPayload(detail.data));
+        }
+        const payload = parseBlenderPayload(detail.data);
+        const userEmail = normalizeEmail(req.session.user?.email);
+        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id);
+        if (!declarationVisibleForUser(payload, userEmail, ownedDroneIds)) {
+          return res.status(403).json({ message: "forbidden_declaration" });
+        }
+      }
+
+      const token = createDevJwt(["flightblender.write"]);
+      const response = await axios.delete(
+        `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}/delete`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 10000,
+          validateStatus: () => true
+        }
+      );
+      if (response.status === 204) {
+        return res.status(204).send();
+      }
+      res.status(response.status).json(parseBlenderPayload(response.data));
+    } catch (error) {
+      console.error("[Blender Proxy] Flight declaration delete error:", error.message);
       res.status(502).json({ message: "Failed to reach Flight Blender" });
     }
   });
@@ -1285,7 +955,6 @@
   // Constants
   let server = app.listen(process.env.PORT || 5000);
 
-  socketConnection(server);
 
   server.on("error", function (e) {
     console.log(e);

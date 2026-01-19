@@ -36,6 +36,15 @@
         window.APP_USER = <%- JSON.stringify(user || null) %>;
         window.__ATC_API_BASE__ = "<%= typeof atcApiBase !== 'undefined' ? atcApiBase : '' %>";
         window.__ATC_WS_BASE__ = "<%= typeof atcWsBase !== 'undefined' ? atcWsBase : '' %>";
+        window.__ATC_WS_TOKEN__ = "<%= typeof atcWsToken !== 'undefined' ? atcWsToken : '' %>";
+        window.__ATC_COMPLIANCE_LIMITS__ = <%- JSON.stringify(typeof complianceLimits !== 'undefined' ? complianceLimits : {}) %>;
+        window.__ROUTE_ENGINE_CONFIG__ = <%- JSON.stringify(typeof routeEngineConfig !== 'undefined' ? routeEngineConfig : {}) %>;
+        window.__ROUTE_PLANNER_CONFIG__ = <%- JSON.stringify(typeof routePlannerConfig !== 'undefined' ? routePlannerConfig : {}) %>;
+        window.__CESIUM_CONFIG__ = {
+            ionToken: <%- JSON.stringify(cesiumIonToken || '') %>,
+            google3dTilesAssetId: <%- JSON.stringify(google3dTilesAssetId || null) %>,
+            osmBuildingsAssetId: <%- JSON.stringify(osmBuildingsAssetId || null) %>
+        };
     </script>
     <!-- Core Scripts -->
     <script src="/assets/js/api-client.js"></script>

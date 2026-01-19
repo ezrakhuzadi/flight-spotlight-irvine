@@ -1,7 +1,7 @@
 {
-  "name": "flight-spotlight",
+  "name": "atc-frontend",
   "version": "0.5.1",
-  "description": "A viewer for Airtraffic, ASTM Remote ID and Flight Authorizations",
+  "description": "Control Center UI for the ATC UTM stack",
   "homepage": "",
   "license": "Apache-2.0",
   "author": {
@@ -23,7 +23,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://www.github.com/openutm/flight-spotlight"
+    "url": "https://github.com/ezrakhuzadi/atc-frontend"
   },
   "devDependencies": {
     "nodemon": "^2.0.21"
@@ -35,7 +35,6 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.5.0",
     "body-parser": "^1.20.3",
-    "bull": "^4.16.5",
     "dotenv": "^16.4.7",
     "ejs": "^3.1.10",
     "express": "^4.21.2",
@@ -47,11 +46,8 @@
     "luxon": "^3.5.0",
     "express-openid-connect": "^2.17.1",
     "qs": "^6.13.1",
-    "redis": "^4.7.0",
     "request": "^2.88.2",
-    "socket.io": "^4.8.1",
     "session-file-store": "^1.5.0",
-    "tile38": "^0.9.4",
     "uuid": "^11.0.5"
   }
 }

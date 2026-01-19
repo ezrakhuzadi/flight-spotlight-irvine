@@ -212,23 +212,8 @@ function initUserStore(options = {}) {
     });
   }
 
-  function ensureDefaults(hashPassword, passwordAlgo) {
-    const defaults = [
-      {
-        id: "guest",
-        name: "Guest User",
-        email: "guest@example.com",
-        password: "guest123",
-        role: "operator"
-      },
-      {
-        id: "admin",
-        name: "Administrator",
-        email: "admin@atc-drone.io",
-        password: "admin123",
-        role: "authority"
-      }
-    ];
+  function ensureDefaults(hashPassword, passwordAlgo, seedUsers = []) {
+    const defaults = Array.isArray(seedUsers) ? seedUsers : [];
 
     defaults.forEach((user) => {
       const existing = getUserById(user.id);

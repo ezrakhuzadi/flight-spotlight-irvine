@@ -372,9 +372,16 @@ let client = AtcClient::with_timeout("http://localhost:3000", Duration::from_sec
 
             <h2 id="registration">Registration</h2>
             <p>Before sending telemetry, drones must register with the ATC server.</p>
+            <div class="callout warning">
+                <strong>Registration Token:</strong> Set <code class="code-inline">ATC_REGISTRATION_TOKEN</code>
+                on the ATC server and pass it as <code class="code-inline">X-Registration-Token</code>.
+            </div>
 
             <div class="code-block">
-                <pre>// Register with auto-generated ID
+                <pre>// Set registration token before first register call
+client.set_registration_token(Some("your-shared-token".to_string()));
+
+// Register with auto-generated ID
 let drone_id = client.register(None).await?;
 
 // Register with custom ID
@@ -460,6 +467,10 @@ for cmd in commands {
                 </div>
                 <div class="api-endpoint-body">
                     <p>Register a new drone.</p>
+                    <strong>Headers:</strong>
+                    <ul>
+                        <li><code class="code-inline">X-Registration-Token</code> - Required when registration token enforcement is enabled.</li>
+                    </ul>
                     <strong>Request Body:</strong>
                     <div class="code-block">
                         <pre>{

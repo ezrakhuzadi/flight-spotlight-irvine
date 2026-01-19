@@ -30,14 +30,24 @@
             if (!frame) return;
 
             const declarationUrl = '/api/blender/flight-declarations';
-            const weatherUrl = '/api/compliance/weather';
-            const analysisUrl = '/api/compliance/analyze';
+            const atcBase = window.__ATC_API_BASE__ || '/api/atc';
+            const complianceUrl = atcBase.replace(/\/$/, '') + '/v1/compliance/evaluate';
             const PREFILL_KEY = 'plannerPrefill';
+
+            const COMPLIANCE_LIMITS = (() => {
+                const overrides = window.__ATC_COMPLIANCE_LIMITS__ || {};
+                return {
+                    maxWindMps: safeNumber(overrides.maxWindMps) ?? 12,
+                    maxGustMps: safeNumber(overrides.maxGustMps) ?? 15,
+                    maxPrecipMm: safeNumber(overrides.maxPrecipMm) ?? 2,
+                    defaultClearanceM: safeNumber(overrides.defaultClearanceM) ?? 60
+                };
+            })();
 
             const COMPLIANCE_DEFAULTS = {
                 batteryCapacityMin: 25,
                 batteryReserveMin: 5,
-                clearanceM: 60,
+                clearanceM: COMPLIANCE_LIMITS.defaultClearanceM,
                 operationType: 1
             };
 
@@ -65,19 +75,6 @@
                 return total;
             }
 
-            function computeCenter(points) {
-                if (!points.length) return null;
-                const sum = points.reduce((acc, pt) => {
-                    acc.lat += pt.lat;
-                    acc.lon += pt.lon;
-                    return acc;
-                }, { lat: 0, lon: 0 });
-                return {
-                    lat: sum.lat / points.length,
-                    lon: sum.lon / points.length
-                };
-            }
-
             function getAltitudeRange(points) {
                 let minAlt = Infinity;
                 let maxAlt = -Infinity;
@@ -97,64 +94,130 @@
                 return Number.isFinite(num) ? num : null;
             }
 
-            async function fetchWeather(center) {
-                if (!center) return null;
-                const url = weatherUrl + '?lat=' + encodeURIComponent(center.lat) + '&lon=' + encodeURIComponent(center.lon);
-                const response = await fetch(url, { credentials: 'same-origin' });
-                if (!response.ok) return null;
-                const data = await response.json();
-                const current = data.current || data.current_weather || {};
+            function mapConflictList(conflicts) {
+                if (!Array.isArray(conflicts)) return [];
+                return conflicts.map((conflict) => ({
+                    id: conflict.id,
+                    name: conflict.name,
+                    distanceM: safeNumber(conflict.distance_m) ?? safeNumber(conflict.distanceM),
+                    severity: conflict.severity || 'conflict'
+                }));
+            }
+
+            function mapHazardList(hazards) {
+                if (!Array.isArray(hazards)) return [];
+                return hazards.map((hazard) => ({
+                    id: hazard.id,
+                    name: hazard.name,
+                    lat: safeNumber(hazard.lat),
+                    lon: safeNumber(hazard.lon),
+                    radiusM: safeNumber(hazard.radius_m) ?? safeNumber(hazard.radiusM),
+                    heightM: safeNumber(hazard.height_m) ?? safeNumber(hazard.heightM),
+                    hazardType: hazard.hazard_type || hazard.hazardType || 'unknown',
+                    source: hazard.source || null,
+                    distanceM: safeNumber(hazard.distance_m) ?? safeNumber(hazard.distanceM)
+                }));
+            }
+
+            function normalizeComplianceResponse(result) {
+                const report = result?.report;
+                if (!report) return null;
+
+                const route = report.route || {};
+                const checks = report.checks || {};
+                const weather = checks.weather || {};
+                const battery = checks.battery || {};
+                const population = checks.population || {};
+                const obstacles = checks.obstacles || {};
+
                 return {
-                    windMps: safeNumber(current.wind_speed_10m ?? current.wind_speed),
-                    gustMps: safeNumber(current.wind_gusts_10m ?? current.wind_gusts),
-                    precipMm: safeNumber(current.precipitation)
+                    generated_at: report.generated_at,
+                    overall_status: report.overall_status,
+                    route: {
+                        distanceM: safeNumber(route.distance_m) ?? 0,
+                        estimatedMinutes: safeNumber(route.estimated_minutes) ?? 0,
+                        hasRoute: !!route.has_route
+                    },
+                    checks: {
+                        weather: {
+                            status: weather.status || 'pending',
+                            message: weather.message || '',
+                            windMps: safeNumber(weather.wind_mps),
+                            gustMps: safeNumber(weather.gust_mps),
+                            precipMm: safeNumber(weather.precip_mm),
+                            maxWindMps: safeNumber(weather.max_wind_mps),
+                            maxGustMps: safeNumber(weather.max_gust_mps),
+                            maxPrecipMm: safeNumber(weather.max_precip_mm),
+                            source: weather.source || null
+                        },
+                        battery: {
+                            status: battery.status || 'pending',
+                            message: battery.message || '',
+                            estimatedMinutes: safeNumber(battery.estimated_minutes),
+                            capacityMin: safeNumber(battery.capacity_min),
+                            reserveMin: safeNumber(battery.reserve_min),
+                            remainingMin: safeNumber(battery.remaining_min),
+                            cruiseSpeedMps: safeNumber(battery.cruise_speed_mps)
+                        },
+                        population: {
+                            status: population.status || 'pending',
+                            message: population.message || '',
+                            density: safeNumber(population.density),
+                            classification: population.classification || null,
+                            buildingCount: safeNumber(population.building_count),
+                            estimatedPopulation: safeNumber(population.estimated_population),
+                            areaKm2: safeNumber(population.area_km2),
+                            source: population.source || null
+                        },
+                        obstacles: {
+                            status: obstacles.status || 'pending',
+                            message: obstacles.message || '',
+                            clearanceM: safeNumber(obstacles.clearance_m),
+                            conflicts: mapConflictList(obstacles.conflicts),
+                            hazards: mapHazardList(obstacles.hazards),
+                            obstacleCount: safeNumber(obstacles.obstacle_count) ?? 0,
+                            truncated: !!obstacles.truncated
+                        }
+                    },
+                    override: { enabled: false, notes: '' },
+                    blocking: Array.isArray(result?.blocking) ? result.blocking : [],
+                    violations: Array.isArray(result?.violations) ? result.violations : [],
+                    ok: !!result?.ok
                 };
             }
 
-            async function fetchAnalysis(points, clearanceM) {
+            async function fetchComplianceReport(points, speedMps, clearanceM, droneId) {
                 if (!points.length) return null;
-                const response = await fetch(analysisUrl, {
+                const waypoints = points.map((pt) => ({
+                    lat: pt.lat,
+                    lon: pt.lon,
+                    altitude_m: Number.isFinite(pt.alt) ? pt.alt : 0
+                }));
+                const payload = {
+                    waypoints,
+                    metadata: {
+                        drone_speed_mps: speedMps,
+                        battery_capacity_min: COMPLIANCE_DEFAULTS.batteryCapacityMin,
+                        battery_reserve_min: COMPLIANCE_DEFAULTS.batteryReserveMin,
+                        clearance_m: clearanceM,
+                        operation_type: COMPLIANCE_DEFAULTS.operationType,
+                        compliance_override_enabled: false
+                    }
+                };
+                if (droneId) {
+                    payload.drone_id = droneId;
+                }
+                const response = await fetch(complianceUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({
-                        points: points.map((pt) => ({ lat: pt.lat, lon: pt.lon })),
-                        clearance_m: clearanceM
-                    })
+                    body: JSON.stringify(payload)
                 });
                 if (!response.ok) return null;
-                return response.json();
-            }
-
-            function buildCompliance(weather, analysis, speedMps, planId) {
-                const density = safeNumber(analysis?.population?.density);
-                const hazards = Array.isArray(analysis?.obstacles) ? analysis.obstacles : [];
-
+                const result = await response.json();
                 return {
-                    atc_plan_id: planId || null,
-                    override: { enabled: false, notes: '' },
-                    checks: {
-                        weather: {
-                            windMps: weather ? weather.windMps : null,
-                            gustMps: weather ? weather.gustMps : null,
-                            precipMm: weather ? weather.precipMm : null,
-                            maxWindMps: 12,
-                            maxGustMps: 15,
-                            maxPrecipMm: 2
-                        },
-                        battery: {
-                            capacityMin: COMPLIANCE_DEFAULTS.batteryCapacityMin,
-                            reserveMin: COMPLIANCE_DEFAULTS.batteryReserveMin,
-                            cruiseSpeedMps: speedMps
-                        },
-                        population: {
-                            density: density
-                        },
-                        obstacles: {
-                            clearanceM: COMPLIANCE_DEFAULTS.clearanceM,
-                            hazards: hazards
-                        }
-                    }
+                    ...result,
+                    compliance: normalizeComplianceResponse(result)
                 };
             }
 
@@ -180,6 +243,42 @@
                         }
                     ]
                 };
+            }
+
+            function generatePlannerFlightId() {
+                if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                    return crypto.randomUUID();
+                }
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            function resolvePlannerFlightId(routeData) {
+                if (!routeData || typeof routeData !== 'object') {
+                    return generatePlannerFlightId();
+                }
+                const existing = routeData.flightId || routeData.flight_id;
+                if (existing) return existing;
+                const generated = generatePlannerFlightId();
+                routeData.flightId = generated;
+                return generated;
+            }
+
+            function extractDeclarationId(payload) {
+                if (!payload || typeof payload !== 'object') return null;
+                return payload.id
+                    || payload.flight_declaration_id
+                    || payload.flight_declaration?.id
+                    || null;
+            }
+
+            function requiresDeclaration(win) {
+                const user = win?.APP_USER;
+                if (!user) return false;
+                return user.role !== 'authority';
             }
 
             function queuePlannerPrefill(prefill) {
@@ -208,30 +307,44 @@
                 return { response, parsed, raw: body };
             }
 
-            async function tryAutoDeclare(result, win) {
-                const payload = result?.payload;
-                const rawWaypoints = Array.isArray(payload?.waypoints) ? payload.waypoints : [];
-                const points = rawWaypoints.map((wp) => ({ lat: wp.lat, lon: wp.lon, alt: wp.alt }));
-                if (!points.length) return;
+            async function createDeclarationFromRoute(routeData, win) {
+                if (!routeData || typeof routeData !== 'object') return null;
+                const existingId = routeData.blenderDeclarationId || routeData.blender_declaration_id;
+                if (existingId) return existingId;
 
-                const speedMps = safeNumber(payload?.metadata?.drone_speed_mps) || 15;
+                const rawWaypoints = Array.isArray(routeData.waypoints) ? routeData.waypoints : [];
+                const points = rawWaypoints.map((wp) => ({
+                    lat: wp.lat,
+                    lon: wp.lon,
+                    alt: Number.isFinite(wp.alt) ? wp.alt : wp.altitude_m
+                })).filter((pt) => Number.isFinite(pt.lat) && Number.isFinite(pt.lon));
+                if (!points.length) return null;
+
+                const flightId = resolvePlannerFlightId(routeData);
+                const defaultSpeed = safeNumber(win?.FlightPlanner?.CONFIG?.DRONE_SPEED_MPS) || 15;
+                const speedMps = safeNumber(routeData.droneSpeedMps) || defaultSpeed;
                 const distanceM = computeRouteDistance(points);
-                const durationSec = safeNumber(payload?.metadata?.total_flight_time_s)
-                    || (speedMps > 0 ? distanceM / speedMps : 0);
+                const durationSec = speedMps > 0 ? distanceM / speedMps : 0;
 
                 const start = new Date(Date.now() + 5 * 60 * 1000);
                 const end = new Date(start.getTime() + Math.max(durationSec, 300) * 1000);
 
-                const center = computeCenter(points);
-                const [weather, analysis] = await Promise.all([
-                    fetchWeather(center),
-                    fetchAnalysis(points, COMPLIANCE_DEFAULTS.clearanceM)
-                ]);
-
-                const flightId = payload?.flight_id || ('planner-' + Date.now());
-                const compliance = buildCompliance(weather, analysis, speedMps, flightId);
                 const altRange = getAltitudeRange(points);
-                const droneId = payload?.metadata?.drone_id || ('PLANNER-' + flightId);
+                const selectedDroneId = win?.FlightPlanner?.getSelectedDroneId?.();
+                const droneId = selectedDroneId || ('PLANNER-' + flightId);
+                const complianceResult = await fetchComplianceReport(
+                    points,
+                    speedMps,
+                    COMPLIANCE_DEFAULTS.clearanceM,
+                    droneId
+                );
+                const compliance = complianceResult?.compliance;
+                if (compliance) {
+                    compliance.atc_plan_id = flightId;
+                }
+                const weatherCheck = compliance?.checks?.weather;
+                const populationCheck = compliance?.checks?.population;
+                const obstaclesCheck = compliance?.checks?.obstacles;
 
                 const declarationPayload = {
                     flight_declaration_geo_json: buildGeoJson(
@@ -244,7 +357,7 @@
                     ),
                     start_datetime: start.toISOString(),
                     end_datetime: end.toISOString(),
-                    submitted_by: window.APP_USER?.email || 'planner@atc.local',
+                    submitted_by: win?.APP_USER?.email || 'planner@atc.local',
                     type_of_operation: COMPLIANCE_DEFAULTS.operationType,
                     originating_party: 'Planner ' + flightId,
                     aircraft_id: droneId
@@ -265,25 +378,33 @@
                     missionEnd: end.toISOString(),
                     batteryCapacityMin: COMPLIANCE_DEFAULTS.batteryCapacityMin,
                     batteryReserveMin: COMPLIANCE_DEFAULTS.batteryReserveMin,
-                    weather: weather,
-                    populationDensity: analysis?.population?.density ?? null,
-                    obstacleClearanceM: COMPLIANCE_DEFAULTS.clearanceM
+                    weather: weatherCheck ? {
+                        windMps: weatherCheck.windMps,
+                        gustMps: weatherCheck.gustMps,
+                        precipMm: weatherCheck.precipMm
+                    } : null,
+                    populationDensity: populationCheck?.density ?? null,
+                    obstacleClearanceM: obstaclesCheck?.clearanceM ?? COMPLIANCE_DEFAULTS.clearanceM
                 };
 
-                if (!weather || !analysis) {
+                if (!compliance || complianceResult?.ok === false) {
                     if (typeof win.showToast === 'function') {
-                        win.showToast('Compliance data incomplete. Redirecting for manual review.', 'warn');
+                        win.showToast('Compliance review required. Redirecting for manual review.', 'warn');
                     }
                     queuePlannerPrefill(prefill);
-                    return;
+                    return null;
                 }
 
                 const { response, parsed, raw } = await submitDeclaration(declarationPayload);
                 if (response.ok) {
+                    const declarationId = extractDeclarationId(parsed);
+                    if (!declarationId) {
+                        throw new Error('Flight Declaration response missing id.');
+                    }
                     if (typeof win.showToast === 'function') {
                         win.showToast('Flight Declaration submitted to Flight Blender.', 'success');
                     }
-                    return;
+                    return declarationId;
                 }
 
                 if (response.status === 400) {
@@ -291,12 +412,13 @@
                         win.showToast('Compliance review required. Opening Mission Plan.', 'warn');
                     }
                     queuePlannerPrefill(prefill);
-                    return;
+                    return null;
                 }
 
                 if (typeof win.showToast === 'function') {
                     win.showToast('Flight Declaration failed: ' + response.status + ' ' + (parsed?.message || raw), 'error');
                 }
+                throw new Error('Flight Declaration failed: ' + response.status);
             }
 
             function patchPlanner(win) {
@@ -307,19 +429,18 @@
                 if (typeof originalSubmit !== 'function') return false;
 
                 win.FlightPlanner.submitToATC = async function (routeData) {
-                    const result = await originalSubmit(routeData);
-
-                    try {
-                        if (result && result.payload) {
-                            await tryAutoDeclare(result, win);
+                    const needsDeclaration = requiresDeclaration(win);
+                    if (needsDeclaration) {
+                        const declarationId = await createDeclarationFromRoute(routeData, win);
+                        if (!declarationId) {
+                            throw new Error('Flight declaration required before ATC submission.');
                         }
-                    } catch (error) {
-                        if (typeof win.showToast === 'function') {
-                            win.showToast('ATC submission failed: ' + error.message, 'error');
+                        if (routeData && typeof routeData === 'object') {
+                            routeData.blenderDeclarationId = declarationId;
                         }
                     }
 
-                    return result;
+                    return originalSubmit(routeData);
                 };
 
                 win.FlightPlanner.__atcMerged = true;

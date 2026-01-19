@@ -6,29 +6,20 @@
 (function () {
     'use strict';
 
+    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
+
     const CONFIG = {
-        CESIUM_ION_TOKEN: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg',
-        GOOGLE_3D_TILES_ASSET_ID: 2275207,
+        CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2500 }
     };
 
-    const COMPLIANCE_LIMITS = {
-        maxWindMps: 12,
-        maxGustMps: 15,
-        maxPrecipMm: 2,
-        windWarnRatio: 0.8,
-        batteryWarnMarginMin: 5,
-        populationBvlosMax: 1500,
-        populationWarn: 2000,
-        populationAbsoluteMax: 4000
-    };
+    function toNumber(value) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    }
 
-    const HAZARDS = [
-        { id: 'tower-1', name: 'Campus Tower', lat: 33.6459, lon: -117.8422, heightM: 60, radiusM: 80 },
-        { id: 'power-1', name: 'Power Corridor', lat: 33.6835, lon: -117.8302, heightM: 30, radiusM: 120 },
-        { id: 'hospital-1', name: 'Helipad Zone', lat: 33.6431, lon: -117.8455, heightM: 40, radiusM: 150 },
-        { id: 'stadium-1', name: 'Stadium Complex', lat: 33.6505, lon: -117.8372, heightM: 50, radiusM: 180 }
-    ];
+    const COMPLIANCE_REFRESH_MS = 400;
     const statusUtils = window.ATCStatus || {
         getStatusLabel: (status) => status || 'Unknown'
     };
@@ -46,7 +37,7 @@
         geofences: [],
         geofenceEntities: new Map(),
         compliance: null,
-        populationInfo: null,
+        complianceTimer: null,
         analysisInFlight: false,
         prefillDroneId: null
     };
@@ -81,6 +72,13 @@
     function toLocalInputValue(date) {
         const offset = date.getTimezoneOffset() * 60000;
         return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+    }
+
+    function generateFlightId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `plan-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     }
 
     async function loadDrones() {
@@ -378,16 +376,9 @@
         }
 
         const inputIds = [
-            'weatherWind',
-            'weatherGust',
-            'weatherPrecip',
-            'weatherMaxWind',
-            'weatherMaxGust',
-            'weatherMaxPrecip',
             'batteryCapacity',
             'batteryReserve',
             'cruiseSpeed',
-            'populationDensity',
             'obstacleClearance',
             'complianceOverride',
             'complianceNotes',
@@ -409,12 +400,27 @@
             });
         });
 
+        lockComplianceInputs();
+    }
+
+    function lockComplianceInputs() {
+        const readonlyIds = [
+            'weatherWind',
+            'weatherGust',
+            'weatherPrecip',
+            'weatherMaxWind',
+            'weatherMaxGust',
+            'weatherMaxPrecip',
+            'populationDensity'
+        ];
+        readonlyIds.forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.readOnly = true;
+        });
+
         const populationClass = document.getElementById('populationClass');
         if (populationClass) {
-            populationClass.addEventListener('change', () => {
-                applyPopulationPreset(false);
-                updateCompliance();
-            });
+            populationClass.disabled = true;
         }
     }
 
@@ -477,7 +483,8 @@
         try {
             const result = await window.RoutePlanner.calculateRoute(plannerWaypoints, {
                 plannedAltitude,
-                defaultAltitudeM: plannedAltitude
+                defaultAltitudeM: plannedAltitude,
+                geofences: state.geofences
             });
             state.routeResult = result;
             state.optimizedRoute = Array.isArray(result?.waypoints) ? result.waypoints : [];
@@ -698,7 +705,7 @@
         if (!state.viewer) return;
         clearHazards();
 
-        const hazards = state.dynamicHazards.length ? state.dynamicHazards : HAZARDS;
+        const hazards = state.dynamicHazards;
 
         state.hazardEntities = hazards.flatMap((hazard) => {
             const position = Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat, 0);
@@ -741,15 +748,192 @@
         state.hazardEntities = [];
     }
 
-    function runComplianceAnalysis() {
-        if (state.analysisInFlight) return;
+    function getComplianceOverride() {
+        return {
+            enabled: !!document.getElementById('complianceOverride')?.checked,
+            notes: (document.getElementById('complianceNotes')?.value || '').trim()
+        };
+    }
+
+    function buildComplianceRequest(activeRoute) {
+        const droneId = document.getElementById('droneSelect')?.value || null;
+        const cruiseSpeed = getNumberValue('cruiseSpeed', 0);
+        const batteryCapacity = getNumberValue('batteryCapacity', 0);
+        const batteryReserve = getNumberValue('batteryReserve', 0);
+        const clearance = getNumberValue('obstacleClearance', 60);
+        const operationType = Number(document.getElementById('operationType')?.value || 1);
+        const override = getComplianceOverride();
+
+        const fallbackAlt = getPlannerAltitude();
+        const waypoints = activeRoute.map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            altitude_m: Number.isFinite(wp.alt) ? wp.alt : fallbackAlt
+        }));
+
+        const metadata = {
+            drone_speed_mps: cruiseSpeed > 0 ? cruiseSpeed : undefined,
+            battery_capacity_min: Number.isFinite(batteryCapacity) && batteryCapacity > 0 ? batteryCapacity : undefined,
+            battery_reserve_min: Number.isFinite(batteryReserve) ? batteryReserve : undefined,
+            clearance_m: Number.isFinite(clearance) ? clearance : undefined,
+            operation_type: operationType,
+            compliance_override_enabled: override.enabled,
+            compliance_override_notes: override.notes || undefined
+        };
+
+        const payload = { waypoints, metadata };
+        if (droneId) payload.drone_id = droneId;
+
+        return { payload, override };
+    }
+
+    function mapConflictList(conflicts) {
+        if (!Array.isArray(conflicts)) return [];
+        return conflicts.map((conflict) => ({
+            id: conflict.id,
+            name: conflict.name,
+            distanceM: toNumber(conflict.distance_m) ?? toNumber(conflict.distanceM),
+            severity: conflict.severity || 'conflict'
+        }));
+    }
+
+    function mapHazardList(hazards) {
+        if (!Array.isArray(hazards)) return [];
+        return hazards
+            .map((hazard) => ({
+                id: hazard.id,
+                name: hazard.name,
+                lat: toNumber(hazard.lat),
+                lon: toNumber(hazard.lon),
+                radiusM: toNumber(hazard.radius_m) ?? toNumber(hazard.radiusM),
+                heightM: toNumber(hazard.height_m) ?? toNumber(hazard.heightM),
+                hazardType: hazard.hazard_type || hazard.hazardType || 'unknown',
+                source: hazard.source || null,
+                distanceM: toNumber(hazard.distance_m) ?? toNumber(hazard.distanceM)
+            }))
+            .filter((hazard) => Number.isFinite(hazard.lat) && Number.isFinite(hazard.lon));
+    }
+
+    function buildPendingComplianceSnapshot(override, result) {
+        return {
+            generated_at: new Date().toISOString(),
+            overall_status: 'pending',
+            route: { distanceM: 0, estimatedMinutes: 0, hasRoute: false },
+            checks: {
+                weather: { status: 'pending', message: 'Awaiting analysis.' },
+                battery: { status: 'pending', message: 'Awaiting analysis.' },
+                population: { status: 'pending', message: 'Awaiting analysis.' },
+                obstacles: { status: 'pending', message: 'Awaiting analysis.', conflicts: [], hazards: [] }
+            },
+            override,
+            blocking: Array.isArray(result?.blocking) ? result.blocking : [],
+            violations: Array.isArray(result?.violations) ? result.violations : [],
+            ok: false
+        };
+    }
+
+    function normalizeComplianceResponse(result, override) {
+        const report = result?.report;
+        if (!report) {
+            return buildPendingComplianceSnapshot(override, result);
+        }
+
+        const route = report.route || {};
+        const checks = report.checks || {};
+        const weather = checks.weather || {};
+        const battery = checks.battery || {};
+        const population = checks.population || {};
+        const obstacles = checks.obstacles || {};
+
+        return {
+            generated_at: report.generated_at,
+            overall_status: report.overall_status,
+            route: {
+                distanceM: toNumber(route.distance_m) ?? 0,
+                estimatedMinutes: toNumber(route.estimated_minutes) ?? 0,
+                hasRoute: !!route.has_route
+            },
+            checks: {
+                weather: {
+                    status: weather.status || 'pending',
+                    message: weather.message || '',
+                    windMps: toNumber(weather.wind_mps),
+                    gustMps: toNumber(weather.gust_mps),
+                    precipMm: toNumber(weather.precip_mm),
+                    maxWindMps: toNumber(weather.max_wind_mps),
+                    maxGustMps: toNumber(weather.max_gust_mps),
+                    maxPrecipMm: toNumber(weather.max_precip_mm),
+                    source: weather.source || null
+                },
+                battery: {
+                    status: battery.status || 'pending',
+                    message: battery.message || '',
+                    estimatedMinutes: toNumber(battery.estimated_minutes),
+                    capacityMin: toNumber(battery.capacity_min),
+                    reserveMin: toNumber(battery.reserve_min),
+                    remainingMin: toNumber(battery.remaining_min),
+                    cruiseSpeedMps: toNumber(battery.cruise_speed_mps)
+                },
+                population: {
+                    status: population.status || 'pending',
+                    message: population.message || '',
+                    density: toNumber(population.density),
+                    classification: population.classification || null,
+                    buildingCount: toNumber(population.building_count),
+                    estimatedPopulation: toNumber(population.estimated_population),
+                    areaKm2: toNumber(population.area_km2),
+                    source: population.source || null
+                },
+                obstacles: {
+                    status: obstacles.status || 'pending',
+                    message: obstacles.message || '',
+                    clearanceM: toNumber(obstacles.clearance_m),
+                    conflicts: mapConflictList(obstacles.conflicts),
+                    hazards: mapHazardList(obstacles.hazards),
+                    obstacleCount: toNumber(obstacles.obstacle_count) ?? 0,
+                    truncated: !!obstacles.truncated
+                }
+            },
+            override,
+            blocking: Array.isArray(result?.blocking) ? result.blocking : [],
+            violations: Array.isArray(result?.violations) ? result.violations : [],
+            ok: !!result?.ok
+        };
+    }
+
+    function applyComplianceInputs(snapshot) {
+        if (!snapshot || !snapshot.checks) return;
+        const weather = snapshot.checks.weather || {};
+        setInputValue('weatherWind', weather.windMps);
+        setInputValue('weatherGust', weather.gustMps);
+        setInputValue('weatherPrecip', weather.precipMm);
+        if (weather.source) setInputValue('weatherSource', weather.source);
+        setInputValue('weatherMaxWind', weather.maxWindMps);
+        setInputValue('weatherMaxGust', weather.maxGustMps);
+        setInputValue('weatherMaxPrecip', weather.maxPrecipMm);
+
+        const population = snapshot.checks.population || {};
+        if (Number.isFinite(population.density)) {
+            setInputValue('populationDensity', Math.round(population.density));
+        }
+        const classSelect = document.getElementById('populationClass');
+        if (classSelect && population.classification) {
+            classSelect.value = population.classification;
+        }
+    }
+
+    async function runComplianceAnalysis() {
+        if (state.analysisInFlight) return state.compliance;
         const activeRoute = getActiveRoute();
         if (!activeRoute.length) {
             const populationMeta = document.getElementById('populationMeta');
             const obstacleMeta = document.getElementById('obstacleMeta');
             if (populationMeta) populationMeta.textContent = 'Add at least one waypoint to analyze.';
             if (obstacleMeta) obstacleMeta.textContent = 'Add at least one waypoint to analyze.';
-            return;
+            const snapshot = buildPendingComplianceSnapshot(getComplianceOverride(), null);
+            state.compliance = snapshot;
+            renderCompliance(snapshot);
+            return snapshot;
         }
 
         const populationMeta = document.getElementById('populationMeta');
@@ -757,55 +941,25 @@
         if (populationMeta) populationMeta.textContent = 'Analyzing population density...';
         if (obstacleMeta) obstacleMeta.textContent = 'Scanning obstacles near route...';
 
-        const clearance = getNumberValue('obstacleClearance', 60);
-        const minAltitude = getNumberValue('minAltitude', 0);
-        const maxAltitude = getNumberValue('maxAltitude', 0);
-        const operationType = Number(document.getElementById('operationType')?.value || 1);
+        const { payload, override } = buildComplianceRequest(activeRoute);
 
         state.analysisInFlight = true;
-        API.getComplianceAnalysis({
-            points: activeRoute.map((wp) => ({ lat: wp.lat, lon: wp.lon })),
-            clearance_m: clearance,
-            min_altitude_m: minAltitude,
-            max_altitude_m: maxAltitude,
-            operation_type: operationType
-        })
-            .then((result) => {
-                const population = result?.population || {};
-                const density = Number(population.density);
-                if (Number.isFinite(density)) {
-                    setInputValue('populationDensity', Math.round(density));
-                    const classSelect = document.getElementById('populationClass');
-                    if (classSelect) {
-                        classSelect.value = classifyPopulation(density);
-                    }
-                    state.populationInfo = {
-                        density,
-                        classification: population.classification,
-                        buildingCount: population.building_count,
-                        estimatedPopulation: population.estimated_population,
-                        areaKm2: result.area_km2,
-                        source: population.source
-                    };
-                }
-
-                if (Array.isArray(result?.obstacles)) {
-                    state.dynamicHazards = result.obstacles.map((hazard) => ({
-                        ...hazard,
-                        radiusM: hazard.radiusM || hazard.radius_m || 60
-                    }));
-                    renderHazards();
-                }
-
-                updateCompliance();
-            })
-            .catch((error) => {
-                if (populationMeta) populationMeta.textContent = `Analysis failed: ${error.message}`;
-                if (obstacleMeta) obstacleMeta.textContent = 'Obstacle scan failed.';
-            })
-            .finally(() => {
-                state.analysisInFlight = false;
-            });
+        try {
+            const result = await API.evaluateCompliance(payload);
+            const snapshot = normalizeComplianceResponse(result, override);
+            state.compliance = snapshot;
+            state.dynamicHazards = snapshot.checks?.obstacles?.hazards || [];
+            renderHazards();
+            applyComplianceInputs(snapshot);
+            renderCompliance(snapshot);
+            return snapshot;
+        } catch (error) {
+            if (populationMeta) populationMeta.textContent = `Analysis failed: ${error.message}`;
+            if (obstacleMeta) obstacleMeta.textContent = 'Obstacle scan failed.';
+            return state.compliance;
+        } finally {
+            state.analysisInFlight = false;
+        }
     }
 
     function applyAutoBattery() {
@@ -826,52 +980,23 @@
         updateCompliance();
     }
 
+    function queueComplianceRefresh() {
+        if (state.analysisInFlight) return;
+        if (state.complianceTimer) {
+            clearTimeout(state.complianceTimer);
+        }
+        state.complianceTimer = setTimeout(() => {
+            state.complianceTimer = null;
+            runComplianceAnalysis();
+        }, COMPLIANCE_REFRESH_MS);
+    }
+
     function updateCompliance() {
-        const snapshot = buildComplianceSnapshot();
-        state.compliance = snapshot;
-        renderCompliance(snapshot);
-        return snapshot;
-    }
-
-    function buildComplianceSnapshot() {
-        const cruiseSpeed = getNumberValue('cruiseSpeed', 0);
-        const route = computeRouteMetrics(getActiveRoute(), cruiseSpeed);
-        const weather = evaluateWeather();
-        const battery = evaluateBattery(route);
-        const population = evaluatePopulation();
-        const obstacles = evaluateObstacles();
-
-        const checks = { weather, battery, population, obstacles };
-        const overallStatus = summarizeStatus(checks);
-        const override = {
-            enabled: !!document.getElementById('complianceOverride')?.checked,
-            notes: (document.getElementById('complianceNotes')?.value || '').trim()
-        };
-
-        return {
-            generated_at: new Date().toISOString(),
-            overall_status: overallStatus,
-            route,
-            checks,
-            override
-        };
-    }
-
-    function summarizeStatus(checks) {
-        let hasWarn = false;
-        let hasPending = false;
-        let hasFail = false;
-
-        Object.values(checks).forEach((check) => {
-            if (check.status === 'fail') hasFail = true;
-            if (check.status === 'pending') hasPending = true;
-            if (check.status === 'warn') hasWarn = true;
-        });
-
-        if (hasFail) return 'fail';
-        if (hasPending) return 'pending';
-        if (hasWarn) return 'warn';
-        return 'pass';
+        queueComplianceRefresh();
+        if (state.compliance) {
+            renderCompliance(state.compliance);
+        }
+        return state.compliance;
     }
 
     function renderCompliance(snapshot) {
@@ -959,354 +1084,6 @@
         return { distanceM, estimatedMinutes, hasRoute: true };
     }
 
-    function evaluateWeather() {
-        const wind = getNumberValue('weatherWind');
-        const gust = getNumberValue('weatherGust');
-        const precip = getNumberValue('weatherPrecip');
-        const maxWind = getNumberValue('weatherMaxWind', COMPLIANCE_LIMITS.maxWindMps);
-        const maxGust = getNumberValue('weatherMaxGust', COMPLIANCE_LIMITS.maxGustMps);
-        const maxPrecip = getNumberValue('weatherMaxPrecip', COMPLIANCE_LIMITS.maxPrecipMm);
-        const source = document.getElementById('weatherSource')?.value || 'Manual';
-
-        if (!Number.isFinite(wind) || !Number.isFinite(gust) || !Number.isFinite(precip)) {
-            return {
-                status: 'pending',
-                message: 'Provide wind, gust, and precipitation values.',
-                windMps: wind,
-                gustMps: gust,
-                precipMm: precip,
-                source
-            };
-        }
-
-        let status = 'pass';
-        if (wind > maxWind || gust > maxGust || precip > maxPrecip) {
-            status = 'fail';
-        } else if (
-            wind > maxWind * COMPLIANCE_LIMITS.windWarnRatio ||
-            gust > maxGust * COMPLIANCE_LIMITS.windWarnRatio ||
-            precip > maxPrecip * COMPLIANCE_LIMITS.windWarnRatio
-        ) {
-            status = 'warn';
-        }
-
-        return {
-            status,
-            windMps: wind,
-            gustMps: gust,
-            precipMm: precip,
-            maxWindMps: maxWind,
-            maxGustMps: maxGust,
-            maxPrecipMm: maxPrecip,
-            source,
-            message: `Wind ${wind.toFixed(1)} m/s, Gust ${gust.toFixed(1)} m/s, Precip ${precip.toFixed(1)} mm (Source: ${source})`
-        };
-    }
-
-    function evaluateBattery(route) {
-        const capacityMin = getNumberValue('batteryCapacity');
-        const reserveMin = getNumberValue('batteryReserve', 0);
-        const cruiseSpeed = getNumberValue('cruiseSpeed', 0);
-
-        if (!route.hasRoute || !Number.isFinite(capacityMin) || !Number.isFinite(cruiseSpeed)) {
-            return { status: 'pending', message: 'Route not evaluated yet.' };
-        }
-
-        const estimatedMinutes = route.estimatedMinutes;
-        const remaining = capacityMin - estimatedMinutes;
-        let status = 'pass';
-
-        if (remaining < reserveMin) {
-            status = 'fail';
-        } else if (remaining < reserveMin + COMPLIANCE_LIMITS.batteryWarnMarginMin) {
-            status = 'warn';
-        }
-
-        return {
-            status,
-            distanceM: route.distanceM,
-            estimatedMinutes,
-            cruiseSpeedMps: cruiseSpeed,
-            capacityMin,
-            reserveMin,
-            remainingMin: remaining,
-            message: `Distance ${formatDistance(route.distanceM)} | Est ${formatMinutes(estimatedMinutes)} | Remaining ${remaining.toFixed(1)} min`
-        };
-    }
-
-    function evaluatePopulation() {
-        const density = getNumberValue('populationDensity');
-        const category = document.getElementById('populationClass')?.value || 'suburban';
-        const operationMode = Number(document.getElementById('operationType')?.value || 1) === 2 ? 'BVLOS' : 'VLOS';
-        const source = state.populationInfo?.source;
-        const buildingCount = state.populationInfo?.buildingCount;
-        const areaKm2 = state.populationInfo?.areaKm2;
-
-        if (!Number.isFinite(density)) {
-            return { status: 'pending', message: 'Awaiting density input.', density };
-        }
-
-        let status = 'pass';
-        if (density >= COMPLIANCE_LIMITS.populationAbsoluteMax) {
-            status = 'fail';
-        } else if (operationMode === 'BVLOS' && density > COMPLIANCE_LIMITS.populationBvlosMax) {
-            status = 'fail';
-        } else if (density >= COMPLIANCE_LIMITS.populationWarn) {
-            status = 'warn';
-        }
-
-        return {
-            status,
-            density,
-            category,
-            operationMode,
-            source,
-            message: `Density ${density.toFixed(0)} people/km^2 (${category}, ${operationMode})`
-                + (Number.isFinite(buildingCount) && Number.isFinite(areaKm2)
-                    ? ` • ${buildingCount} buildings / ${areaKm2.toFixed(2)} km^2`
-                    : '')
-                + (source ? ` • Source: ${source}` : '')
-        };
-    }
-
-    function evaluateObstacles() {
-        const clearance = getNumberValue('obstacleClearance', 60);
-        const minAltitude = getNumberValue('minAltitude', 0);
-        const maxAltitude = getNumberValue('maxAltitude', 0);
-        const activeRoute = getActiveRoute();
-
-        if (!activeRoute.length) {
-            return { status: 'pending', message: 'No route to evaluate.', clearanceM: clearance, conflicts: [] };
-        }
-
-        const hazards = state.dynamicHazards.length ? state.dynamicHazards : HAZARDS;
-        const conflicts = [];
-        const warnings = [];
-        let nearest = { name: null, distanceM: Infinity };
-
-        if (state.geofences.length) {
-            state.geofences.forEach((geofence) => {
-                if (!altitudeOverlaps(minAltitude, maxAltitude, geofence.lower_altitude_m, geofence.upper_altitude_m)) {
-                    return;
-                }
-                const polygon = normalizePolygon(geofence.polygon);
-                if (polygon.length < 3) {
-                    return;
-                }
-                const intersects = routeIntersectsPolygon(activeRoute, polygon);
-                const distance = distanceRouteToPolygonMeters(activeRoute, polygon);
-                if (Number.isFinite(distance) && distance < nearest.distanceM) {
-                    nearest = { name: geofence.name, distanceM: distance };
-                }
-                if (intersects) {
-                    conflicts.push({
-                        id: geofence.id,
-                        name: geofence.name,
-                        distanceM: 0,
-                        severity: 'conflict'
-                    });
-                } else if (distance <= clearance) {
-                    warnings.push({
-                        id: geofence.id,
-                        name: geofence.name,
-                        distanceM: distance,
-                        severity: 'near'
-                    });
-                }
-            });
-        }
-
-        hazards.forEach((hazard) => {
-            const hazardRadius = hazard.radiusM || 60;
-            const distance = distanceToRouteMeters(hazard, activeRoute);
-            const conflictThreshold = hazardRadius + clearance;
-            const warnThreshold = hazardRadius + clearance * 1.5;
-            if (distance < conflictThreshold) {
-                conflicts.push({
-                    id: hazard.id,
-                    name: hazard.name,
-                    distanceM: distance,
-                    requiredClearanceM: conflictThreshold,
-                    severity: 'conflict'
-                });
-            } else if (distance < warnThreshold) {
-                warnings.push({
-                    id: hazard.id,
-                    name: hazard.name,
-                    distanceM: distance,
-                    requiredClearanceM: warnThreshold,
-                    severity: 'near'
-                });
-            }
-            if (distance < nearest.distanceM) {
-                nearest = { name: hazard.name, distanceM: distance };
-            }
-        });
-
-        const status = conflicts.length ? 'fail' : warnings.length ? 'warn' : 'pass';
-        const nearestText = Number.isFinite(nearest.distanceM)
-            ? `${nearest.name} at ${formatDistance(nearest.distanceM)}`
-            : 'No hazards evaluated';
-        const summary = [];
-        if (conflicts.length) {
-            summary.push(`Conflicts: ${conflicts.map((h) => h.name).join(', ')}`);
-        }
-        if (!conflicts.length && warnings.length) {
-            summary.push(`Near clearance: ${warnings.map((h) => h.name).join(', ')}`);
-        }
-        if (!summary.length) {
-            summary.push(`Nearest hazard: ${nearestText}`);
-        }
-
-        return {
-            status,
-            clearanceM: clearance,
-            hazards,
-            conflicts: conflicts.concat(warnings),
-            nearest,
-            message: summary.join(' | ')
-        };
-    }
-
-    function altitudeOverlaps(minAlt, maxAlt, lowerAlt, upperAlt) {
-        const min = Number.isFinite(minAlt) ? minAlt : 0;
-        const max = Number.isFinite(maxAlt) ? maxAlt : minAlt;
-        const lower = Number.isFinite(lowerAlt) ? lowerAlt : 0;
-        const upper = Number.isFinite(upperAlt) ? upperAlt : 0;
-        return max >= lower && min <= upper;
-    }
-
-    function normalizePolygon(polygon) {
-        if (!Array.isArray(polygon)) return [];
-        if (polygon.length < 3) return polygon.slice();
-        const normalized = polygon.map(([lat, lon]) => ({ lat, lon }));
-        const first = normalized[0];
-        const last = normalized[normalized.length - 1];
-        if (first.lat === last.lat && first.lon === last.lon) {
-            normalized.pop();
-        }
-        return normalized;
-    }
-
-    function routeIntersectsPolygon(waypoints, polygon) {
-        if (waypoints.length < 2 || polygon.length < 3) return false;
-        const refLat = polygon.reduce((sum, p) => sum + p.lat, 0) / polygon.length;
-        const polyXY = polygon.map((point) => projectToPlane(point, refLat));
-
-        for (let i = 1; i < waypoints.length; i += 1) {
-            const start = projectToPlane(waypoints[i - 1], refLat);
-            const end = projectToPlane(waypoints[i], refLat);
-            if (pointInPolygon(start, polyXY) || pointInPolygon(end, polyXY)) {
-                return true;
-            }
-            for (let j = 0; j < polyXY.length; j += 1) {
-                const a = polyXY[j];
-                const b = polyXY[(j + 1) % polyXY.length];
-                if (segmentsIntersect(start, end, a, b)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    function pointInPolygon(point, polygon) {
-        let inside = false;
-        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-            const xi = polygon[i].x;
-            const yi = polygon[i].y;
-            const xj = polygon[j].x;
-            const yj = polygon[j].y;
-            const intersect = ((yi > point.y) !== (yj > point.y)) &&
-                (point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 0.0000001) + xi);
-            if (intersect) inside = !inside;
-        }
-        return inside;
-    }
-
-    function segmentsIntersect(p1, p2, q1, q2) {
-        const o1 = orientation(p1, p2, q1);
-        const o2 = orientation(p1, p2, q2);
-        const o3 = orientation(q1, q2, p1);
-        const o4 = orientation(q1, q2, p2);
-
-        if (o1 !== o2 && o3 !== o4) {
-            return true;
-        }
-
-        if (o1 === 0 && onSegment(p1, q1, p2)) return true;
-        if (o2 === 0 && onSegment(p1, q2, p2)) return true;
-        if (o3 === 0 && onSegment(q1, p1, q2)) return true;
-        if (o4 === 0 && onSegment(q1, p2, q2)) return true;
-
-        return false;
-    }
-
-    function orientation(a, b, c) {
-        const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
-        if (Math.abs(value) < 1e-9) return 0;
-        return value > 0 ? 1 : 2;
-    }
-
-    function onSegment(a, b, c) {
-        return b.x <= Math.max(a.x, c.x) &&
-            b.x >= Math.min(a.x, c.x) &&
-            b.y <= Math.max(a.y, c.y) &&
-            b.y >= Math.min(a.y, c.y);
-    }
-
-    function distanceRouteToPolygonMeters(waypoints, polygon) {
-        let minDistance = Infinity;
-        polygon.forEach((vertex) => {
-            const distance = distanceToRouteMeters(vertex, waypoints);
-            if (distance < minDistance) minDistance = distance;
-        });
-        return minDistance;
-    }
-
-    function distanceToRouteMeters(hazard, waypoints) {
-        if (waypoints.length === 1) {
-            return haversineDistanceMeters(waypoints[0], hazard);
-        }
-
-        let minDistance = Infinity;
-        for (let i = 1; i < waypoints.length; i += 1) {
-            const start = waypoints[i - 1];
-            const end = waypoints[i];
-            const distance = distancePointToSegmentMeters(hazard, start, end);
-            if (distance < minDistance) minDistance = distance;
-        }
-        return minDistance;
-    }
-
-    function distancePointToSegmentMeters(point, start, end) {
-        const refLat = (point.lat + start.lat + end.lat) / 3;
-        const p = projectToPlane(point, refLat);
-        const a = projectToPlane(start, refLat);
-        const b = projectToPlane(end, refLat);
-        const abx = b.x - a.x;
-        const aby = b.y - a.y;
-        const apx = p.x - a.x;
-        const apy = p.y - a.y;
-        const abLenSq = abx * abx + aby * aby;
-        if (abLenSq === 0) {
-            return Math.hypot(apx, apy);
-        }
-        const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
-        const closestX = a.x + t * abx;
-        const closestY = a.y + t * aby;
-        return Math.hypot(p.x - closestX, p.y - closestY);
-    }
-
-    function projectToPlane(point, refLat) {
-        const radLat = toRadians(point.lat);
-        const radLon = toRadians(point.lon);
-        const radRef = toRadians(refLat);
-        const x = 6371000 * radLon * Math.cos(radRef);
-        const y = 6371000 * radLat;
-        return { x, y };
-    }
-
     function haversineDistanceMeters(a, b) {
         const radLat1 = toRadians(a.lat);
         const radLat2 = toRadians(b.lat);
@@ -1345,36 +1122,7 @@
     function fetchWeather() {
         const meta = document.getElementById('weatherMeta');
         if (meta) meta.textContent = 'Fetching weather...';
-
-        const center = getComplianceCenter();
-        if (!center) {
-            if (meta) meta.textContent = 'Unable to determine a location for weather data.';
-            return;
-        }
-
-        API.getComplianceWeather(center.lat, center.lon)
-            .then((data) => {
-                const current = data.current || data.current_weather || {};
-                const wind = Number.isFinite(current.wind_speed_10m) ? current.wind_speed_10m : current.wind_speed;
-                const gust = Number.isFinite(current.wind_gusts_10m) ? current.wind_gusts_10m : current.wind_gusts;
-                const precip = Number.isFinite(current.precipitation) ? current.precipitation : null;
-
-                setInputValue('weatherWind', wind);
-                setInputValue('weatherGust', gust);
-                setInputValue('weatherPrecip', precip);
-                setInputValue('weatherSource', 'Open-Meteo');
-
-                state.weather = {
-                    fetchedAt: new Date().toISOString(),
-                    source: 'Open-Meteo',
-                    data
-                };
-
-                updateCompliance();
-            })
-            .catch((error) => {
-                if (meta) meta.textContent = `Weather fetch failed: ${error.message}`;
-            });
+        runComplianceAnalysis();
     }
 
     function setInputValue(id, value) {
@@ -1387,42 +1135,36 @@
         }
     }
 
-    function getComplianceCenter() {
-        const activeRoute = getActiveRoute();
-        if (activeRoute.length) {
-            const sum = activeRoute.reduce((acc, wp) => {
-                acc.lat += wp.lat;
-                acc.lon += wp.lon;
-                return acc;
-            }, { lat: 0, lon: 0 });
-            return {
-                lat: sum.lat / activeRoute.length,
-                lon: sum.lon / activeRoute.length
-            };
-        }
-
-        if (state.viewer && state.viewer.camera && state.viewer.camera.positionCartographic) {
-            const carto = state.viewer.camera.positionCartographic;
-            return {
-                lat: Cesium.Math.toDegrees(carto.latitude),
-                lon: Cesium.Math.toDegrees(carto.longitude)
-            };
-        }
-
-        return CONFIG.DEFAULT_VIEW;
-    }
 
     function getBlockingChecks(snapshot) {
-        if (!snapshot || !snapshot.checks) return ['Compliance data missing'];
+        if (!snapshot) return ['Compliance data missing'];
         const labels = {
             weather: 'Weather',
             battery: 'Battery',
             population: 'Population',
-            obstacles: 'Obstacles'
+            obstacles: 'Obstacles',
+            override: 'Override'
         };
-        return Object.entries(snapshot.checks)
-            .filter(([, check]) => check.status === 'fail' || check.status === 'pending')
-            .map(([key]) => labels[key] || key);
+        const violationLabels = {
+            route: 'Route',
+            geofence: 'Geofence',
+            altitude: 'Altitude',
+            coordinate: 'Coordinates',
+            trajectory: 'Trajectory'
+        };
+
+        const blockingKeys = Array.isArray(snapshot.blocking) && snapshot.blocking.length
+            ? snapshot.blocking
+            : Object.entries(snapshot.checks || {})
+                .filter(([, check]) => check.status === 'fail' || check.status === 'pending')
+                .map(([key]) => key);
+
+        const blockingChecks = blockingKeys.map((key) => labels[key] || key);
+        const violations = Array.isArray(snapshot.violations)
+            ? snapshot.violations.map((violation) => violationLabels[violation.type] || violation.type || 'Violation')
+            : [];
+
+        return Array.from(new Set([...blockingChecks, ...violations]));
     }
 
     function showMessage(type, message) {
@@ -1477,6 +1219,9 @@
         const cruiseAltitude = Number.isFinite(maxAltitude) && maxAltitude > 0
             ? maxAltitude
             : minAltitude;
+        const batteryCapacity = getNumberValue('batteryCapacity', 0);
+        const batteryReserve = getNumberValue('batteryReserve', 0);
+        const clearanceM = getNumberValue('obstacleClearance', 60);
 
         if (!droneId) {
             showMessage('error', 'Select a drone before submitting.');
@@ -1486,8 +1231,8 @@
             showMessage('error', 'Mission name is required.');
             return;
         }
-        if (state.waypoints.length === 0) {
-            showMessage('error', 'Add at least one waypoint.');
+        if (state.waypoints.length < 2) {
+            showMessage('error', 'Add at least two waypoints.');
             return;
         }
         if (!startInput || !endInput) {
@@ -1498,7 +1243,16 @@
         const startTime = new Date(startInput).toISOString();
         const endTime = new Date(endInput).toISOString();
 
-        const complianceSnapshot = updateCompliance();
+        const complianceSnapshot = await runComplianceAnalysis();
+        if (!complianceSnapshot) {
+            showMessage('error', 'Compliance data unavailable. Run analysis and try again.');
+            return;
+        }
+        const flightId = generateFlightId();
+        const compliancePayload = {
+            ...(complianceSnapshot || {}),
+            atc_plan_id: flightId
+        };
         const blockingChecks = getBlockingChecks(complianceSnapshot);
         const overrideEnabled = complianceSnapshot.override?.enabled;
         const overrideNotes = complianceSnapshot.override?.notes || '';
@@ -1520,7 +1274,7 @@
         const routeMinAlt = routeAltitudes.length ? Math.min(...routeAltitudes) : minAltitude;
         const routeMaxAlt = routeAltitudes.length ? Math.max(...routeAltitudes) : maxAltitude;
 
-        const flightDeclarationGeoJson = buildGeoJson(routeMinAlt, routeMaxAlt, startTime, endTime, complianceSnapshot);
+        const flightDeclarationGeoJson = buildGeoJson(routeMinAlt, routeMaxAlt, startTime, endTime, compliancePayload);
         const submittedBy = window.APP_USER?.email || 'guest@example.com';
         const originatingParty = `${missionName} (${missionType})`;
 
@@ -1549,20 +1303,44 @@
         const atcWaypoints = activeRoute.map((wp) => ({
             lat: wp.lat,
             lon: wp.lon,
-            altitude_m: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude,
-            speed_mps: cruiseSpeed > 0 ? cruiseSpeed : undefined
+            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
         }));
 
-        const metadata = declarationId ? { blender_declaration_id: declarationId } : undefined;
+        const trajectorySource = Array.isArray(state.optimizedRoute) && state.optimizedRoute.length >= 2
+            ? state.optimizedRoute
+            : activeRoute;
+        const trajectoryLog = trajectorySource.map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
+        }));
+
+        const metadata = {
+            drone_id: droneId,
+            blender_declaration_id: declarationId || undefined,
+            drone_speed_mps: cruiseSpeed > 0 ? cruiseSpeed : undefined,
+            battery_capacity_min: Number.isFinite(batteryCapacity) && batteryCapacity > 0 ? batteryCapacity : undefined,
+            battery_reserve_min: Number.isFinite(batteryReserve) ? batteryReserve : undefined,
+            clearance_m: Number.isFinite(clearanceM) ? clearanceM : undefined,
+            operation_type: operationType,
+            compliance_override_enabled: overrideEnabled,
+            compliance_override_notes: overrideNotes || undefined
+        };
         try {
-            await API.createFlightPlan({
-                drone_id: droneId,
+            await API.createPlannerFlightPlan({
+                flight_id: flightId,
                 waypoints: atcWaypoints,
-                departure_time: startTime,
+                trajectory_log: trajectoryLog,
+                owner_id: window.APP_USER?.id || undefined,
                 metadata
             });
         } catch (error) {
-            showMessage('error', `Declaration submitted, but ATC plan failed: ${error.message}`);
+            if (declarationId) {
+                API.deleteFlightDeclaration(declarationId).catch((cleanupError) => {
+                    console.warn('[Mission] Failed to rollback Blender declaration:', cleanupError);
+                });
+            }
+            showMessage('error', `ATC plan failed; attempted Blender rollback. ${error.message}`);
             return;
         }
 

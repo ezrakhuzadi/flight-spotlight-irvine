@@ -12,6 +12,7 @@
     let conflictStarts = new Map();
     let resolvedHistory = [];
     let selectedKey = null;
+    let lastLoadError = null;
 
     function getOwnerId() {
         const user = window.APP_USER;
@@ -98,9 +99,20 @@
     async function loadConflicts() {
         try {
             const conflicts = await API.getConflicts(getOwnerId());
+            lastLoadError = null;
             updateConflicts(conflicts || []);
         } catch (error) {
             console.error('[Conflicts] Load failed:', error);
+            lastLoadError = 'Conflict feed unavailable (backend unreachable).';
+            activeConflicts = [];
+            resolvedHistory = [];
+            conflictStarts.clear();
+            selectedKey = null;
+            renderAlert();
+            renderStats();
+            renderConflictList();
+            renderConflictDetail();
+            renderHistory();
         }
     }
 
@@ -135,6 +147,12 @@
         const alertText = document.getElementById('conflictAlertText');
         if (!alertEl || !alertText) return;
 
+        if (lastLoadError) {
+            alertEl.style.display = 'flex';
+            alertText.textContent = 'Conflict feed unavailable';
+            return;
+        }
+
         if (!activeConflicts.length) {
             alertEl.style.display = 'none';
             return;
@@ -145,6 +163,18 @@
     }
 
     function renderStats() {
+        if (lastLoadError) {
+            const criticalEl = document.getElementById('criticalConflicts');
+            const warningEl = document.getElementById('warningConflicts');
+            const resolvedEl = document.getElementById('resolvedToday');
+            const avgEl = document.getElementById('avgResolutionTime');
+            if (criticalEl) criticalEl.textContent = '--';
+            if (warningEl) warningEl.textContent = '--';
+            if (resolvedEl) resolvedEl.textContent = '--';
+            if (avgEl) avgEl.textContent = '--';
+            return;
+        }
+
         const criticalCount = activeConflicts.filter(c => String(c.severity).toLowerCase() === 'critical').length;
         const warningCount = activeConflicts.filter(c => String(c.severity).toLowerCase() === 'warning').length;
         const now = Date.now();
@@ -168,6 +198,16 @@
     function renderConflictList() {
         const container = document.getElementById('conflictList');
         if (!container) return;
+
+        if (lastLoadError) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-text">Conflict feed unavailable</div>
+                    <p class="text-muted mt-sm">${lastLoadError}</p>
+                </div>
+            `;
+            return;
+        }
 
         if (!activeConflicts.length) {
             container.innerHTML = `
@@ -209,6 +249,15 @@
     function renderConflictDetail() {
         const detail = document.getElementById('conflictDetail');
         if (!detail) return;
+
+        if (lastLoadError) {
+            detail.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-text">Conflict data unavailable</div>
+                </div>
+            `;
+            return;
+        }
 
         const conflict = activeConflicts.find(c => buildConflictKey(c) === selectedKey);
         if (!conflict) {
@@ -274,6 +323,15 @@
     function renderHistory() {
         const tbody = document.querySelector('#conflictHistory tbody');
         if (!tbody) return;
+
+        if (lastLoadError) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-muted">Conflict history unavailable</td>
+                </tr>
+            `;
+            return;
+        }
 
         if (!resolvedHistory.length) {
             tbody.innerHTML = `

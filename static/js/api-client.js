@@ -309,6 +309,12 @@ const API = (function () {
             method: 'POST',
             body: JSON.stringify(payload)
         }),
+        deleteFlightDeclaration: (id) => {
+            const safeId = encodeURIComponent(id);
+            return requestLocal(`/api/blender/flight-declarations/${safeId}`, {
+                method: 'DELETE'
+            });
+        },
 
         // Flight Plans (ATC-Drone)
         createFlightPlan: async (payload) => {
@@ -317,6 +323,17 @@ const API = (function () {
                 plan.owner_id = await resolveOwnerId(plan.drone_id, plan.owner_id);
             }
             return request('/v1/flights/plan', {
+                method: 'POST',
+                body: JSON.stringify(plan)
+            });
+        },
+        createPlannerFlightPlan: async (payload) => {
+            const plan = { ...(payload || {}) };
+            const droneId = plan.drone_id || plan.metadata?.drone_id;
+            if (plan.owner_id === undefined || plan.owner_id === null) {
+                plan.owner_id = await resolveOwnerId(droneId, plan.owner_id);
+            }
+            return request('/v1/flights', {
                 method: 'POST',
                 body: JSON.stringify(plan)
             });
@@ -330,11 +347,7 @@ const API = (function () {
         },
 
         // Compliance
-        getComplianceWeather: (lat, lon) => {
-            const params = new URLSearchParams({ lat, lon });
-            return requestLocal(`/api/compliance/weather?${params.toString()}`);
-        },
-        getComplianceAnalysis: (payload) => requestLocal('/api/compliance/analyze', {
+        evaluateCompliance: (payload) => request('/v1/compliance/evaluate', {
             method: 'POST',
             body: JSON.stringify(payload)
         }),
