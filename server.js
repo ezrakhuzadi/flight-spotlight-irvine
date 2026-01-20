@@ -312,7 +312,7 @@
   app.use(session({
     store: new FileStore({
       path: sessionPath,
-      logFn: () => {}
+      logFn: () => { }
     }),
     secret: sessionSecret,
     resave: false,
@@ -807,8 +807,8 @@
         const records = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.results)
-              ? payload.results
-              : [];
+            ? payload.results
+            : [];
         const filtered = records.filter(decl => declarationVisibleForUser(decl, userEmail, ownedDroneIds));
         if (Array.isArray(payload)) {
           payload = filtered;
@@ -953,7 +953,11 @@
   });
 
   // Constants
-  let server = app.listen(process.env.PORT || 5000);
+  const port = process.env.PORT || 5000;
+  let server = app.listen(port, "0.0.0.0", () => {
+    console.log(`[SERVER] Listening on 0.0.0.0:${port}`);
+    console.log(`[CONFIG] ATC_URL: ${ATC_URL}`);
+  });
 
 
   server.on("error", function (e) {
