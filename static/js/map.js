@@ -852,20 +852,22 @@
         }
     }
 
-    function renderConflicts(conflicts) {
-        // Remove old conflict entities
-        const currentConflictIds = new Set(conflicts.map(c => `${c.drone1_id}-${c.drone2_id}`));
-        for (const [id, entity] of conflictEntities) {
-            if (!currentConflictIds.has(id)) {
-                viewer.entities.remove(entity);
-                conflictEntities.delete(id);
-            }
-        }
+    // Track conflict severity to detect changes (for material updates)
+    const conflictSeverityCache = new Map(); // conflictId -> severity
 
-        // Add/update conflict lines
+    function renderConflicts(conflicts) {
+        // Build set of current conflict IDs for cleanup
+        const currentConflictIds = new Set();
+        const newConflictingDrones = new Set();
+
+        // Process each conflict - update existing or create new
         for (const conflict of conflicts) {
             const conflictId = `${conflict.drone1_id}-${conflict.drone2_id}`;
+            currentConflictIds.add(conflictId);
+            newConflictingDrones.add(conflict.drone1_id);
+            newConflictingDrones.add(conflict.drone2_id);
 
+            // Get drone positions
             const drone1 = droneEntities.get(conflict.drone1_id);
             const drone2 = droneEntities.get(conflict.drone2_id);
             if (!drone1 || !drone2) continue;
@@ -874,12 +876,13 @@
             const pos2 = drone2.position?.getValue(viewer.clock.currentTime);
             if (!pos1 || !pos2) continue;
 
-            // Color based on severity
+            // Determine visual properties based on severity
+            const severity = conflict.severity || 'advisory';
             let lineColor, lineWidth;
-            if (conflict.severity === 'critical') {
+            if (severity === 'critical') {
                 lineColor = Cesium.Color.RED;
                 lineWidth = 4;
-            } else if (conflict.severity === 'warning') {
+            } else if (severity === 'warning') {
                 lineColor = Cesium.Color.ORANGE;
                 lineWidth = 3;
             } else {
@@ -888,9 +891,22 @@
             }
 
             if (conflictEntities.has(conflictId)) {
+                // UPDATE existing entity - only update positions (most common case)
                 const entity = conflictEntities.get(conflictId);
                 entity.polyline.positions = [pos1, pos2];
+
+                // Only update material if severity changed (expensive operation)
+                const cachedSeverity = conflictSeverityCache.get(conflictId);
+                if (cachedSeverity !== severity) {
+                    entity.polyline.width = lineWidth;
+                    entity.polyline.material = new Cesium.PolylineGlowMaterialProperty({
+                        glowPower: 0.3,
+                        color: lineColor
+                    });
+                    conflictSeverityCache.set(conflictId, severity);
+                }
             } else {
+                // CREATE new entity - only when conflict is first detected
                 const entity = viewer.entities.add({
                     id: `conflict-${conflictId}`,
                     polyline: {
@@ -903,27 +919,32 @@
                     }
                 });
                 conflictEntities.set(conflictId, entity);
-                console.log(`[Map] Conflict: ${conflict.severity.toUpperCase()} ${conflict.drone1_id} <-> ${conflict.drone2_id}`);
+                conflictSeverityCache.set(conflictId, severity);
+                console.log(`[Map] Conflict: ${severity.toUpperCase()} ${conflict.drone1_id} <-> ${conflict.drone2_id}`);
             }
 
-            // Color drone models based on conflict
-            if (conflict.severity === 'critical') {
+            // Update drone silhouette colors based on conflict severity
+            if (severity === 'critical') {
                 if (drone1.model) drone1.model.silhouetteColor = Cesium.Color.RED;
                 if (drone2.model) drone2.model.silhouetteColor = Cesium.Color.RED;
-            } else if (conflict.severity === 'warning') {
+            } else if (severity === 'warning') {
                 if (drone1.model) drone1.model.silhouetteColor = Cesium.Color.ORANGE;
                 if (drone2.model) drone2.model.silhouetteColor = Cesium.Color.ORANGE;
             }
         }
 
-        // Reset non-conflicting drones
-        const conflictingDrones = new Set();
-        conflicts.forEach(c => {
-            conflictingDrones.add(c.drone1_id);
-            conflictingDrones.add(c.drone2_id);
-        });
+        // CLEANUP: Remove only entities that are no longer in the conflict list
+        for (const [id, entity] of conflictEntities) {
+            if (!currentConflictIds.has(id)) {
+                viewer.entities.remove(entity);
+                conflictEntities.delete(id);
+                conflictSeverityCache.delete(id);
+            }
+        }
+
+        // Reset silhouette color for drones no longer in conflict
         for (const [id, entity] of droneEntities) {
-            if (!conflictingDrones.has(id) && entity.model) {
+            if (!newConflictingDrones.has(id) && entity.model) {
                 const source = droneData.get(id)?.source || 'local';
                 entity.model.silhouetteColor = getTrafficSilhouetteColor(source);
             }
