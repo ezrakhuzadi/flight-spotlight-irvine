@@ -27,44 +27,15 @@
         rejected: 'Rejected',
         cancelled: 'Cancelled'
     };
+    const utils = window.ATCUtils;
 
-    function getOwnerContext() {
-        const user = window.APP_USER;
-        if (!user || user.role === 'authority') return null;
-        const email = (user.email || '').trim().toLowerCase();
-        return { id: user.id || null, email: email || null };
-    }
-
-    function normalizeEmail(value) {
-        return String(value || '').trim().toLowerCase();
-    }
-
-    function parseGeoJsonValue(geo) {
-        if (!geo) return null;
-        if (typeof geo === 'string') {
-            try {
-                return JSON.parse(geo);
-            } catch (error) {
-                return null;
-            }
-        }
-        return geo;
-    }
-
-    function extractCompliance(mission) {
-        const geo = mission.flight_declaration_geojson
-            || mission.flight_declaration_geo_json
-            || mission.flight_declaration_raw_geojson;
-        const data = parseGeoJsonValue(geo);
-        return data?.features?.[0]?.properties?.compliance || null;
-    }
-
-    function getAtcPlanId(mission) {
-        const compliance = extractCompliance(mission);
-        return compliance?.atc_plan_id
-            || compliance?.atc_plan?.id
-            || compliance?.atcPlanId
-            || null;
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function getPlanTimestamp(plan) {
@@ -106,7 +77,7 @@
 
     function getPlanForMission(mission, planIndex) {
         if (!mission || !planIndex) return null;
-        const planId = getAtcPlanId(mission);
+        const planId = utils.getAtcPlanId(mission);
         if (planId && planIndex.byPlanId.has(planId)) {
             return planIndex.byPlanId.get(planId);
         }
@@ -127,7 +98,7 @@
     function matchesOwner(mission, owner, droneIds) {
         if (!owner) return true;
         const emailMatch = owner.email
-            && normalizeEmail(mission?.submitted_by) === owner.email;
+            && utils.normalizeEmail(mission?.submitted_by) === owner.email;
         const droneId = mission?.aircraft_id || '';
         const droneMatch = droneId && droneIds.has(droneId);
         return emailMatch || droneMatch;
@@ -138,7 +109,7 @@
      */
     async function loadMissions() {
         try {
-            const owner = getOwnerContext();
+            const owner = utils.getOwnerContext();
             const ownerId = owner?.id || null;
             const [declarations, conformance, plans, drones] = await Promise.all([
                 API.getFlightDeclarations(),
@@ -194,24 +165,30 @@
 
         container.innerHTML = missions.map(mission => {
             const missionId = mission.id || mission.pk || '';
-            const missionName = mission.originating_party || (missionId ? `Mission ${missionId.slice(0, 8)}` : 'Mission');
-            const stateLabel = STATE_LABELS[mission.state] || 'Unknown';
-            const timeRange = `${formatDate(mission.start_datetime)} - ${formatDate(mission.end_datetime)}`;
+            const missionIdText = missionId ? String(missionId) : '';
+            const missionNameRaw = mission.originating_party
+                || (missionIdText ? `Mission ${missionIdText.slice(0, 8)}` : 'Mission');
+            const missionName = escapeHtml(missionNameRaw);
+            const stateLabel = escapeHtml(STATE_LABELS[mission.state] || 'Unknown');
+            const timeRange = escapeHtml(
+                `${utils.formatDateTime(mission.start_datetime, 'Unknown')} - ${utils.formatDateTime(mission.end_datetime, 'Unknown')}`
+            );
+            const aircraftId = escapeHtml(mission.aircraft_id || 'Unassigned');
             const compliance = getComplianceSummary(mission);
             const complianceLine = compliance
-                ? `<div class="list-item-subtitle"><span class="status-badge ${compliance.className}">Compliance ${compliance.label}</span></div>`
+                ? `<div class="list-item-subtitle"><span class="status-badge ${compliance.className}">Compliance ${escapeHtml(compliance.label)}</span></div>`
                 : '';
             const conformance = getConformanceSummary(mission, conformanceMap);
             const conformanceLine = conformance
-                ? `<div class="list-item-subtitle"><span class="status-badge ${conformance.className}">Conformance ${conformance.label}</span></div>`
+                ? `<div class="list-item-subtitle"><span class="status-badge ${conformance.className}">Conformance ${escapeHtml(conformance.label)}</span></div>`
                 : '';
             const conformanceDetail = conformance?.detail
-                ? `<div class="list-item-subtitle">${conformance.detail}</div>`
+                ? `<div class="list-item-subtitle">${escapeHtml(conformance.detail)}</div>`
                 : '';
             const plan = getPlanForMission(mission, planIndex);
             const planSummary = getPlanSummary(plan);
             const planLine = planSummary
-                ? `<div class="list-item-subtitle"><span class="status-badge ${planSummary.className}">ATC Plan ${planSummary.label}</span></div>`
+                ? `<div class="list-item-subtitle"><span class="status-badge ${planSummary.className}">ATC Plan ${escapeHtml(planSummary.label)}</span></div>`
                 : mission.aircraft_id
                     ? `<div class="list-item-subtitle"><span class="status-badge warn">ATC Plan Not Submitted</span></div>`
                     : '';
@@ -224,15 +201,16 @@
             const plannerComplianceLine = complianceBadge
                 ? `<div class="list-item-subtitle">${complianceBadge}</div>`
                 : '';
-            const detailsButton = missionId
-                ? `<button class="btn btn-ghost btn-sm" onclick="window.location.href='/control/missions/${missionId}'">Details</button>`
+            const detailsHref = missionIdText ? `/control/missions/${encodeURIComponent(missionIdText)}` : '';
+            const detailsButton = missionIdText
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.location.href='${detailsHref}'">Details</button>`
                 : '';
             return `
                 <div class="list-item">
                     <span class="status-dot ${type === 'active' ? 'flying' : 'idle'}"></span>
                     <div class="list-item-content">
                         <div class="list-item-title">${missionName}</div>
-                        <div class="list-item-subtitle">Drone: ${mission.aircraft_id || 'Unassigned'}</div>
+                        <div class="list-item-subtitle">Drone: ${aircraftId}</div>
                         <div class="list-item-subtitle">State: ${stateLabel}</div>
                         <div class="list-item-subtitle">${timeRange}</div>
                         ${complianceLine}
@@ -244,7 +222,7 @@
                     <div class="list-item-actions">
                         ${detailsButton}
                         ${type === 'active' ? `
-                            <button class="btn btn-ghost btn-sm" onclick="window.location.href='/control/map?track=${mission.aircraft_id || ''}'">
+                            <button class="btn btn-ghost btn-sm" onclick="window.location.href='/control/map?track=${encodeURIComponent(mission.aircraft_id || '')}'">
                                 Track
                             </button>
                         ` : ''}
@@ -279,19 +257,7 @@
     }
 
     function getComplianceSummary(mission) {
-        const geo = mission.flight_declaration_geojson
-            || mission.flight_declaration_geo_json
-            || mission.flight_declaration_raw_geojson;
-        if (!geo) return null;
-        let data = geo;
-        if (typeof geo === 'string') {
-            try {
-                data = JSON.parse(geo);
-            } catch (error) {
-                return null;
-            }
-        }
-        const compliance = data?.features?.[0]?.properties?.compliance;
+        const compliance = utils.extractCompliance(mission);
         if (!compliance) return null;
         const status = compliance.overall_status || 'pending';
         const className = ['pass', 'warn', 'fail', 'pending'].includes(status) ? status : 'pending';
@@ -306,7 +272,7 @@
             return { className: 'warn', label: 'Unknown' };
         }
         const status = entry.status || 'unknown';
-        const className = getConformanceClass(status);
+        const className = utils.getConformanceClass(status);
         const label = status === 'nonconforming' ? 'Nonconforming' : status === 'conforming' ? 'Conforming' : 'Unknown';
         const record = entry.record;
         const detail = status === 'nonconforming' && record
@@ -315,19 +281,8 @@
         return { className, label, detail };
     }
 
-    function getConformanceClass(status) {
-        switch (status) {
-            case 'conforming':
-                return 'pass';
-            case 'nonconforming':
-                return 'fail';
-            default:
-                return 'warn';
-        }
-    }
-
     async function abortMission(droneId) {
-        if (!confirm(`Abort mission and land ${droneId}?`)) return;
+        if (!confirm(`Abort mission and hold ${droneId}?`)) return;
 
         try {
             await API.holdDrone(droneId, 999);
@@ -340,13 +295,6 @@
 
     function planNewMission() {
         window.location.href = '/control/missions/plan';
-    }
-
-    function formatDate(dateString) {
-        if (!dateString) return 'Unknown';
-        const date = new Date(dateString);
-        if (Number.isNaN(date.getTime())) return dateString;
-        return date.toLocaleString();
     }
 
     // Initialize

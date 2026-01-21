@@ -32,33 +32,8 @@
         rejected: 'Rejected',
         cancelled: 'Cancelled'
     };
-
-    function getOwnerContext() {
-        const user = window.APP_USER;
-        if (!user || user.role === 'authority') return null;
-        const email = (user.email || '').trim().toLowerCase();
-        return { id: user.id || null, email: email || null };
-    }
-
-    function normalizeEmail(value) {
-        return String(value || '').trim().toLowerCase();
-    }
-
-    function extractCompliance(mission) {
-        const geo = mission.flight_declaration_geojson
-            || mission.flight_declaration_geo_json
-            || mission.flight_declaration_raw_geojson;
-        const data = parseGeoJson(geo);
-        return data?.features?.[0]?.properties?.compliance || null;
-    }
-
-    function getAtcPlanId(mission) {
-        const compliance = extractCompliance(mission);
-        return compliance?.atc_plan_id
-            || compliance?.atc_plan?.id
-            || compliance?.atcPlanId
-            || null;
-    }
+    const utils = window.ATCUtils;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     function getPlanTimestamp(plan) {
         const raw = plan?.created_at || plan?.departure_time || plan?.arrival_time || '';
@@ -84,7 +59,7 @@
     function matchesOwner(mission, owner, droneIds) {
         if (!owner) return true;
         const emailMatch = owner.email
-            && normalizeEmail(mission?.submitted_by) === owner.email;
+            && utils.normalizeEmail(mission?.submitted_by) === owner.email;
         const droneId = mission?.aircraft_id || '';
         const droneMatch = droneId && droneIds.has(droneId);
         return emailMatch || droneMatch;
@@ -127,47 +102,17 @@
         if (el) el.textContent = value;
     }
 
-    function formatDate(value) {
-        if (!value) return '--';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return value;
-        return date.toLocaleString();
-    }
-
     function getStatusClass(state) {
         if (state === 2 || state === 3 || state === 4) return 'flying';
         if (state === 5 || state === 6 || state === 7 || state === 8) return 'offline';
         return 'online';
     }
 
-    function getConformanceClass(status) {
-        switch (status) {
-            case 'conforming':
-                return 'pass';
-            case 'nonconforming':
-                return 'fail';
-            default:
-                return 'warn';
-        }
-    }
-
-    function haversineDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371000;
-        const toRad = (deg) => deg * Math.PI / 180;
-        const dLat = toRad(lat2 - lat1);
-        const dLon = toRad(lon2 - lon1);
-        const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-            Math.sin(dLon / 2) ** 2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
     function computeRouteDistance(waypoints) {
         if (!Array.isArray(waypoints) || waypoints.length < 2) return null;
         let total = 0;
         for (let i = 0; i < waypoints.length - 1; i += 1) {
-            total += haversineDistance(
+            total += utils.haversineMeters(
                 waypoints[i].lat,
                 waypoints[i].lon,
                 waypoints[i + 1].lat,
@@ -223,7 +168,7 @@
     function findPlanForMission(plans, mission) {
         if (!Array.isArray(plans) || !mission) return null;
 
-        const planId = getAtcPlanId(mission);
+        const planId = utils.getAtcPlanId(mission);
         if (planId) {
             const match = findLatestPlan(plans, (plan) => plan?.flight_id === planId);
             if (match) return match;
@@ -445,18 +390,6 @@
         mapState.viewer.camera.flyTo({ destination: rectangle, duration: 1.0 });
     }
 
-    function parseGeoJson(geo) {
-        if (!geo) return null;
-        if (typeof geo === 'string') {
-            try {
-                return JSON.parse(geo);
-            } catch (error) {
-                return null;
-            }
-        }
-        return geo;
-    }
-
     function extractCoordinates(geo) {
         if (!geo || !Array.isArray(geo.features)) return [];
         const coords = [];
@@ -512,7 +445,7 @@
     }
 
     async function loadMission() {
-        const owner = getOwnerContext();
+        const owner = utils.getOwnerContext();
         const ownerId = owner?.id || null;
         let visibleDroneIds = new Set();
         let mission;
@@ -546,7 +479,7 @@
             })
             : plans;
         const plan = findPlanForMission(scopedPlans || [], mission);
-        const geo = parseGeoJson(
+        const geo = utils.parseGeoJson(
             mission.flight_declaration_geojson
             || mission.flight_declaration_geo_json
             || mission.flight_declaration_raw_geojson
@@ -587,12 +520,12 @@
         const typeLabel = OPERATION_TYPES[mission.type_of_operation] || `Type ${mission.type_of_operation ?? '--'}`;
         setText('droneId', mission.aircraft_id || '--');
         setText('missionType', typeLabel);
-        setText('createdAt', formatDate(mission.created_at || mission.updated_at || mission.start_datetime));
-        setText('startedAt', formatDate(mission.start_datetime));
+        setText('createdAt', utils.formatDateTime(mission.created_at || mission.updated_at || mission.start_datetime));
+        setText('startedAt', utils.formatDateTime(mission.start_datetime));
 
         const progress = computeProgress(mission.start_datetime, mission.end_datetime);
         setText('progress', progress !== null ? `${progress}%` : '--');
-        setText('eta', mission.end_datetime ? formatDate(mission.end_datetime) : '--');
+        setText('eta', mission.end_datetime ? utils.formatDateTime(mission.end_datetime) : '--');
 
         if (mapWaypoints.length) {
             const distance = computeRouteDistance(mapWaypoints);
@@ -619,8 +552,8 @@
                         <div class="list-item">
                             <span class="status-dot online"></span>
                             <div class="list-item-content">
-                                <div class="list-item-title">${label}</div>
-                                <div class="list-item-subtitle">${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)} @ ${altitude}m</div>
+                                <div class="list-item-title">${escapeHtml(label)}</div>
+                                <div class="list-item-subtitle">${escapeHtml(wp.lat.toFixed(5))}, ${escapeHtml(wp.lon.toFixed(5))} @ ${escapeHtml(altitude)}m</div>
                             </div>
                             <span class="status-badge online">Planned</span>
                         </div>
@@ -670,11 +603,11 @@
         const conformanceEl = document.getElementById('conformanceStatus');
         if (conformanceEl) {
             conformanceEl.textContent = conformanceLabel;
-            conformanceEl.className = `detail-value status-badge ${getConformanceClass(conformanceStatus)}`;
+            conformanceEl.className = `detail-value status-badge ${utils.getConformanceClass(conformanceStatus)}`;
         }
         setText('conformanceCode', conformanceEntry?.record?.conformance_state_code || '--');
         setText('conformanceDescription', conformanceEntry?.record?.description || '--');
-        setText('conformanceUpdated', formatDate(conformanceEntry?.last_checked));
+        setText('conformanceUpdated', utils.formatDateTime(conformanceEntry?.last_checked));
 
         const abortBtn = document.getElementById('abortMission');
         if (abortBtn) {

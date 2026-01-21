@@ -7,6 +7,7 @@
 
     const REFRESH_INTERVAL = 4000;
     const MAX_HISTORY = 20;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     let activeConflicts = [];
     let conflictStarts = new Map();
@@ -203,7 +204,7 @@
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-text">Conflict feed unavailable</div>
-                    <p class="text-muted mt-sm">${lastLoadError}</p>
+                    <p class="text-muted mt-sm">${escapeHtml(lastLoadError)}</p>
                 </div>
             `;
             return;
@@ -234,13 +235,13 @@
             const isSelected = selectedKey === key ? 'selected' : '';
 
             return `
-                <div class="list-item ${isSelected}" data-conflict-key="${key}">
+                <div class="list-item ${isSelected}" data-conflict-key="${escapeHtml(key)}">
                     <span class="status-dot conflict"></span>
                     <div class="list-item-content">
-                        <div class="list-item-title">${conflict.drone1_id} vs ${conflict.drone2_id}</div>
-                        <div class="list-item-subtitle">Separation: ${distance} • TCA: ${timeToClosest}</div>
+                        <div class="list-item-title">${escapeHtml(conflict.drone1_id)} vs ${escapeHtml(conflict.drone2_id)}</div>
+                        <div class="list-item-subtitle">Separation: ${escapeHtml(distance)} • TCA: ${escapeHtml(timeToClosest)}</div>
                     </div>
-                    <span class="status-badge ${severityClass}">${severityLabel}</span>
+                    <span class="status-badge ${severityClass}">${escapeHtml(severityLabel)}</span>
                 </div>
             `;
         }).join('');
@@ -280,41 +281,41 @@
             <div class="mb-md">
                 <div class="detail-row">
                     <span class="detail-label">Severity</span>
-                    <span class="status-badge ${severityClass}">${severityLabel}</span>
+                    <span class="status-badge ${severityClass}">${escapeHtml(severityLabel)}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">Drones</span>
-                    <span class="detail-value">${conflict.drone1_id} / ${conflict.drone2_id}</span>
+                    <span class="detail-value">${escapeHtml(conflict.drone1_id)} / ${escapeHtml(conflict.drone2_id)}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">Current Separation</span>
-                    <span class="detail-value">${distance}</span>
+                    <span class="detail-value">${escapeHtml(distance)}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">Closest Distance</span>
-                    <span class="detail-value">${closestDistance}</span>
+                    <span class="detail-value">${escapeHtml(closestDistance)}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">Time To Closest</span>
-                    <span class="detail-value">${timeToClosest}</span>
+                    <span class="detail-value">${escapeHtml(timeToClosest)}</span>
                 </div>
                 <div class="detail-row">
                     <span class="detail-label">CPA Location</span>
-                    <span class="detail-value">${cpaText}</span>
+                    <span class="detail-value">${escapeHtml(cpaText)}</span>
                 </div>
             </div>
             <div class="flex gap-sm">
-                <button class="btn btn-warning btn-sm" data-action="hold" data-drone="${conflict.drone1_id}">
-                    HOLD ${conflict.drone1_id}
+                <button class="btn btn-warning btn-sm" data-action="hold" data-drone="${escapeHtml(conflict.drone1_id)}">
+                    HOLD ${escapeHtml(conflict.drone1_id)}
                 </button>
-                <button class="btn btn-warning btn-sm" data-action="hold" data-drone="${conflict.drone2_id}">
-                    HOLD ${conflict.drone2_id}
+                <button class="btn btn-warning btn-sm" data-action="hold" data-drone="${escapeHtml(conflict.drone2_id)}">
+                    HOLD ${escapeHtml(conflict.drone2_id)}
                 </button>
-                <button class="btn btn-success btn-sm" data-action="resume" data-drone="${conflict.drone1_id}">
-                    RESUME ${conflict.drone1_id}
+                <button class="btn btn-success btn-sm" data-action="resume" data-drone="${escapeHtml(conflict.drone1_id)}">
+                    RESUME ${escapeHtml(conflict.drone1_id)}
                 </button>
-                <button class="btn btn-success btn-sm" data-action="resume" data-drone="${conflict.drone2_id}">
-                    RESUME ${conflict.drone2_id}
+                <button class="btn btn-success btn-sm" data-action="resume" data-drone="${escapeHtml(conflict.drone2_id)}">
+                    RESUME ${escapeHtml(conflict.drone2_id)}
                 </button>
             </div>
         `;
@@ -350,11 +351,11 @@
             const duration = formatSeconds(entry.durationMs / 1000);
             return `
                 <tr>
-                    <td>${resolvedAt}</td>
-                    <td>${conflict.drone1_id || '--'} - ${conflict.drone2_id || '--'}</td>
-                    <td><span class="status-badge ${severityClass}">${severityLabel}</span></td>
+                    <td>${escapeHtml(resolvedAt)}</td>
+                    <td>${escapeHtml(conflict.drone1_id || '--')} - ${escapeHtml(conflict.drone2_id || '--')}</td>
+                    <td><span class="status-badge ${severityClass}">${escapeHtml(severityLabel)}</span></td>
                     <td>Auto</td>
-                    <td>${duration}</td>
+                    <td>${escapeHtml(duration)}</td>
                 </tr>
             `;
         }).join('');

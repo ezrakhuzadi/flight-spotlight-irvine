@@ -108,6 +108,83 @@ const API = (function () {
         }
     }
 
+    function normalizeEmail(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
+    function getOwnerContext() {
+        const user = typeof window !== 'undefined' ? window.APP_USER : null;
+        if (!user || user.role === 'authority') return null;
+        const email = normalizeEmail(user.email || '');
+        return { id: user.id || null, email: email || null };
+    }
+
+    function parseGeoJson(value) {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            try {
+                return JSON.parse(value);
+            } catch (error) {
+                return null;
+            }
+        }
+        return value;
+    }
+
+    function extractGeoJson(source) {
+        if (!source) return null;
+        const raw = source.flight_declaration_geojson
+            || source.flight_declaration_geo_json
+            || source.flight_declaration_raw_geojson
+            || null;
+        return parseGeoJson(raw);
+    }
+
+    function extractCompliance(source) {
+        const geo = extractGeoJson(source);
+        return geo?.features?.[0]?.properties?.compliance || null;
+    }
+
+    function getAtcPlanId(source) {
+        const compliance = extractCompliance(source);
+        return compliance?.atc_plan_id
+            || compliance?.atc_plan?.id
+            || compliance?.atcPlanId
+            || null;
+    }
+
+    function getConformanceClass(status) {
+        switch (status) {
+            case 'conforming':
+                return 'pass';
+            case 'nonconforming':
+                return 'fail';
+            default:
+                return 'warn';
+        }
+    }
+
+    function formatDateTime(value, fallback = '--') {
+        if (!value) return fallback;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+    }
+
+    function haversineMeters(lat1, lon1, lat2, lon2) {
+        const earthRadiusM = 6371000;
+        const phi1 = lat1 * Math.PI / 180;
+        const phi2 = lat2 * Math.PI / 180;
+        const dphi = (lat2 - lat1) * Math.PI / 180;
+        const dlambda = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(dphi / 2) * Math.sin(dphi / 2)
+            + Math.cos(phi1) * Math.cos(phi2)
+            * Math.sin(dlambda / 2) * Math.sin(dlambda / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return earthRadiusM * c;
+    }
+
     if (typeof window !== 'undefined') {
         window.ATCStatus = {
             normalizeDroneStatus,
@@ -115,6 +192,17 @@ const API = (function () {
             isOnlineStatus,
             getStatusClass,
             getStatusLabel
+        };
+        window.ATCUtils = {
+            normalizeEmail,
+            getOwnerContext,
+            parseGeoJson,
+            extractGeoJson,
+            extractCompliance,
+            getAtcPlanId,
+            getConformanceClass,
+            formatDateTime,
+            haversineMeters
         };
     }
 

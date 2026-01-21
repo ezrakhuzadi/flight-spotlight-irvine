@@ -1,31 +1,69 @@
 /**
- * Route Planner - Building-aware route analysis
- * Uses Cesium terrain + OSM buildings to compute safe routes.
+ * Route Planner - Server-backed route analysis
+ * Uses backend routing; frontend only visualizes and hydrates terrain heights.
  */
 
 (function (root) {
     'use strict';
 
-    const CesiumConfig = window.__CESIUM_CONFIG__ || {};
-    const ATC_SERVER_URL = window.__ATC_API_BASE__ || 'http://localhost:3000';
+    const CesiumConfig = root.__CESIUM_CONFIG__ || {};
+    const ATC_BASE_FALLBACK = '/api/atc';
+
+    function safeParentValue(key) {
+        try {
+            if (root.parent && root.parent !== root) {
+                return root.parent[key];
+            }
+        } catch (error) {
+            return '';
+        }
+        return '';
+    }
+
+    function normalizeAtcBase(value) {
+        if (typeof value !== 'string') return '';
+        const trimmed = value.trim();
+        return trimmed ? trimmed.replace(/\/$/, '') : '';
+    }
+
+    function resolveAtcBase() {
+        const candidates = [
+            root.__ATC_API_BASE__,
+            safeParentValue('__ATC_API_BASE__'),
+            ATC_BASE_FALLBACK
+        ];
+        for (const candidate of candidates) {
+            const normalized = normalizeAtcBase(candidate);
+            if (normalized) return normalized;
+        }
+        return normalizeAtcBase(ATC_BASE_FALLBACK);
+    }
+
+    function joinUrl(base, path) {
+        if (!base) return path;
+        if (base.endsWith('/') && path.startsWith('/')) {
+            return base.slice(0, -1) + path;
+        }
+        if (!base.endsWith('/') && !path.startsWith('/')) {
+            return `${base}/${path}`;
+        }
+        return base + path;
+    }
+
+    const ATC_SERVER_URL = resolveAtcBase();
 
     const DEFAULTS = Object.assign({
         OSM_BUILDINGS_ASSET_ID: Number(CesiumConfig.osmBuildingsAssetId) || 96188,
         FAA_MAX_ALTITUDE_AGL_M: 121,
         DEFAULT_SAFETY_BUFFER_M: 20,
         DEFAULT_SAMPLE_SPACING_M: 5,
-        MIN_SAMPLE_SPACING_M: 5,
-        MAX_SAMPLE_SPACING_M: 30,
-        TARGET_STEP_COUNT: 320,
         DEFAULT_LANE_RADIUS_M: 90,
-        MAX_LANE_RADIUS_M: 240,
+        MAX_LANE_RADIUS_M: 1800,
         LANE_SPACING_M: 15,
-        LANE_EXPANSION_STEP_M: 60,
-        FAN_OFFSETS: null,
+        LANE_EXPANSION_STEP_M: 100,
         TILESET_LOAD_TIMEOUT_MS: 15000,
-        TILESET_POLL_INTERVAL_MS: 200,
-        ALLOW_LOCAL_FALLBACK: false
-    }, window.__ROUTE_PLANNER_CONFIG__ || {});
+        TILESET_POLL_INTERVAL_MS: 200
+    }, root.__ROUTE_PLANNER_CONFIG__ || {});
 
     const state = {
         viewer: null,
@@ -56,27 +94,60 @@
         return distance;
     }
 
-    function resolveSampleSpacing(waypoints, config) {
-        const distance = computeRouteDistance(waypoints);
-        if (!distance) return config.DEFAULT_SAMPLE_SPACING_M;
-        const spacing = distance / config.TARGET_STEP_COUNT;
-        return Math.min(config.MAX_SAMPLE_SPACING_M, Math.max(config.MIN_SAMPLE_SPACING_M, spacing));
+    function looksLikeJsonBody(contentType, text) {
+        if (contentType && contentType.includes('application/json')) {
+            return true;
+        }
+        if (!text) return false;
+        const trimmed = text.trim();
+        return trimmed.startsWith('{') || trimmed.startsWith('[');
     }
 
-    function buildLaneOffsets(radiusMeters, spacingMeters) {
-        const steps = Math.max(1, Math.floor(radiusMeters / spacingMeters));
-        const offsets = [];
-        for (let i = -steps; i <= steps; i += 1) {
-            offsets.push(i * spacingMeters);
+    function parseJsonBody(contentType, text) {
+        if (!looksLikeJsonBody(contentType, text)) {
+            return null;
         }
-        return offsets;
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            return null;
+        }
     }
 
-    function resolveLaneOffsets(config, radiusMeters) {
-        if (Array.isArray(config.FAN_OFFSETS) && config.FAN_OFFSETS.length) {
-            return config.FAN_OFFSETS;
+    function extractErrorMessage(data, fallbackText, status) {
+        if (data) {
+            if (Array.isArray(data.errors) && data.errors.length) {
+                const messages = data.errors
+                    .map((entry) => {
+                        if (typeof entry === 'string') return entry;
+                        if (entry && typeof entry.message === 'string') return entry.message;
+                        return null;
+                    })
+                    .filter(Boolean);
+                if (messages.length) {
+                    return messages.join(', ');
+                }
+            } else if (typeof data.errors === 'string' && data.errors) {
+                return data.errors;
+            }
+            if (typeof data.error === 'string' && data.error) {
+                return data.error;
+            }
+            if (typeof data.message === 'string' && data.message) {
+                return data.message;
+            }
         }
-        return buildLaneOffsets(radiusMeters, config.LANE_SPACING_M);
+
+        const fallback = (fallbackText || '').trim();
+        if (fallback) {
+            const looksJson = fallback.startsWith('{') || fallback.startsWith('[');
+            if (!looksJson) {
+                return fallback;
+            }
+        }
+
+        const statusLabel = Number.isFinite(status) ? status : 'unknown';
+        return `Route plan failed: ${statusLabel}`;
     }
 
     function normalizeWaypoints(waypoints, defaultAlt) {
@@ -98,26 +169,31 @@
             lane_radius_m: config.DEFAULT_LANE_RADIUS_M,
             lane_spacing_m: config.LANE_SPACING_M,
             sample_spacing_m: config.DEFAULT_SAMPLE_SPACING_M,
-            safety_buffer_m: config.DEFAULT_SAFETY_BUFFER_M
+            safety_buffer_m: config.DEFAULT_SAFETY_BUFFER_M,
+            max_lane_radius_m: config.MAX_LANE_RADIUS_M,
+            lane_expansion_step_m: config.LANE_EXPANSION_STEP_M
         };
 
-        const response = await fetch(`${ATC_SERVER_URL}/v1/routes/plan`, {
+        const response = await fetch(joinUrl(ATC_SERVER_URL, '/v1/routes/plan'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || `Route plan failed: ${response.status}`);
+        const contentType = response.headers.get('content-type') || '';
+        const bodyText = await response.text();
+        const data = parseJsonBody(contentType, bodyText);
+
+        if (!response.ok || (data && data.ok === false)) {
+            const message = extractErrorMessage(data, bodyText, response.status);
+            throw new Error(message);
         }
 
-        const data = await response.json();
-        if (!data || data.ok === false) {
-            const errors = Array.isArray(data?.errors) ? data.errors.join(', ') : 'Route plan failed';
-            throw new Error(errors);
+        if (data) {
+            return data;
         }
-        return data;
+
+        return {};
     }
 
     async function applyTerrainToServerWaypoints(waypoints) {
@@ -170,259 +246,6 @@
         return state.osmTilesetPromise;
     }
 
-    async function waitForTiles(tileset, config) {
-        if (!tileset) return false;
-
-        const start = performance.now();
-        const timeoutMs = config.TILESET_LOAD_TIMEOUT_MS;
-        const pollMs = config.TILESET_POLL_INTERVAL_MS;
-
-        while (performance.now() - start < timeoutMs) {
-            state.viewer.scene.render();
-            if (tileset.tilesLoaded) {
-                return true;
-            }
-            await new Promise((resolve) => setTimeout(resolve, pollMs));
-        }
-
-        return false;
-    }
-
-    function generateGridSamples(waypoints, spacingMeters, config, laneOffsets) {
-        if (waypoints.length < 2) return null;
-
-        const offsets = Array.isArray(laneOffsets) && laneOffsets.length
-            ? laneOffsets
-            : resolveLaneOffsets(config, config.DEFAULT_LANE_RADIUS_M);
-        const lanes = offsets.map(() => []);
-        const centerLine = [];
-        const waypointIndices = [0];
-        let totalSteps = 0;
-
-        for (let i = 0; i < waypoints.length - 1; i += 1) {
-            const start = waypoints[i];
-            const end = waypoints[i + 1];
-
-            const startCarto = Cesium.Cartographic.fromDegrees(start.lon, start.lat);
-            const endCarto = Cesium.Cartographic.fromDegrees(end.lon, end.lat);
-            const geodesic = new Cesium.EllipsoidGeodesic(startCarto, endCarto);
-            const distance = geodesic.surfaceDistance;
-            const heading = geodesic.startHeading;
-            const rightHeading = heading + (Math.PI / 2);
-
-            const numSteps = Math.max(1, Math.ceil(distance / spacingMeters));
-
-            for (let j = 0; j <= numSteps; j += 1) {
-                if (j === numSteps && i < waypoints.length - 2) continue;
-
-                const fraction = j / numSteps;
-                const centerPoint = geodesic.interpolateUsingSurfaceDistance(fraction * distance);
-                const alt = start.alt + fraction * (end.alt - start.alt);
-                const centerCart = Cesium.Cartographic.toCartesian(centerPoint);
-
-                centerLine.push({
-                    lat: Cesium.Math.toDegrees(centerPoint.latitude),
-                    lon: Cesium.Math.toDegrees(centerPoint.longitude),
-                    alt: alt
-                });
-
-                offsets.forEach((offset, laneIdx) => {
-                    if (offset === 0) {
-                        lanes[laneIdx].push({
-                            lat: Cesium.Math.toDegrees(centerPoint.latitude),
-                            lon: Cesium.Math.toDegrees(centerPoint.longitude),
-                            alt: alt
-                        });
-                        return;
-                    }
-
-                    const transform = Cesium.Transforms.eastNorthUpToFixedFrame(centerCart);
-                    const matrix = Cesium.Matrix4.getMatrix3(transform, new Cesium.Matrix3());
-                    const enuRight = new Cesium.Cartesian3(
-                        Math.sin(rightHeading),
-                        Math.cos(rightHeading),
-                        0
-                    );
-                    const offsetVec = Cesium.Cartesian3.multiplyByScalar(enuRight, offset, new Cesium.Cartesian3());
-                    const worldOffset = Cesium.Matrix3.multiplyByVector(matrix, offsetVec, new Cesium.Cartesian3());
-                    const finalPos = Cesium.Cartesian3.add(centerCart, worldOffset, new Cesium.Cartesian3());
-                    const finalCarto = Cesium.Cartographic.fromCartesian(finalPos);
-
-                    lanes[laneIdx].push({
-                        lat: Cesium.Math.toDegrees(finalCarto.latitude),
-                        lon: Cesium.Math.toDegrees(finalCarto.longitude),
-                        alt: alt
-                    });
-                });
-            }
-
-            totalSteps = centerLine.length;
-            if (i < waypoints.length - 2) {
-                waypointIndices.push(totalSteps - 1);
-            }
-        }
-
-        waypointIndices.push(centerLine.length - 1);
-
-        return { lanes, centerLine, waypointIndices };
-    }
-
-    async function analyzeGrid(grid, config) {
-        if (!grid) return null;
-
-        if (state.osmTileset && !state.osmTileset.ready) {
-            await state.osmTileset.readyPromise;
-        }
-
-        if (state.osmTileset) {
-            await waitForTiles(state.osmTileset, config);
-        }
-
-        const allPoints = [];
-        const map = [];
-
-        grid.lanes.forEach((lane, laneIdx) => {
-            lane.forEach((point, pointIdx) => {
-                const pos = Cesium.Cartesian3.fromDegrees(point.lon, point.lat, 1000);
-                allPoints.push(pos);
-                map.push({ laneIdx, pointIdx });
-            });
-        });
-
-        let clampedPositions = [];
-        try {
-            clampedPositions = await state.viewer.scene.clampToHeightMostDetailed(
-                allPoints,
-                [],
-                1.0
-            );
-        } catch (error) {
-            console.warn('[RoutePlanner] clampToHeightMostDetailed failed:', error);
-            clampedPositions = allPoints.map((pos) => {
-                if (!pos) return null;
-                try {
-                    const carto = Cesium.Cartographic.fromCartesian(pos);
-                    return carto ? Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0) : null;
-                } catch (e) {
-                    return null;
-                }
-            });
-        }
-
-        const terrainCartos = allPoints.map((pos) => {
-            if (!pos) return Cesium.Cartographic.fromDegrees(0, 0, 0);
-            try {
-                return Cesium.Cartographic.fromCartesian(pos);
-            } catch (e) {
-                return Cesium.Cartographic.fromDegrees(0, 0, 0);
-            }
-        }).filter((carto) => carto !== null);
-
-        let terrainHeights;
-        try {
-            terrainHeights = await Cesium.sampleTerrainMostDetailed(state.viewer.terrainProvider, terrainCartos);
-        } catch (error) {
-            console.warn('[RoutePlanner] Terrain sampling failed:', error);
-            terrainHeights = terrainCartos;
-        }
-
-        let maxObstacleHeight = -9999;
-        let maxBuildingHeight = 0;
-        let buildingsDetected = 0;
-
-        clampedPositions.forEach((clampedPos, i) => {
-            const { laneIdx, pointIdx } = map[i];
-            const point = grid.lanes[laneIdx][pointIdx];
-            const terrainCarto = terrainHeights[i];
-
-            if (!clampedPos) {
-                point.obstacleHeight = terrainCarto ? terrainCarto.height : 0;
-                point.terrainHeight = terrainCarto ? terrainCarto.height : 0;
-                point.buildingHeight = 0;
-                return;
-            }
-
-            const clampedCarto = Cesium.Cartographic.fromCartesian(clampedPos);
-            if (!clampedCarto) {
-                point.obstacleHeight = terrainCarto ? terrainCarto.height : 0;
-                point.terrainHeight = terrainCarto ? terrainCarto.height : 0;
-                point.buildingHeight = 0;
-                return;
-            }
-
-            const obstacleHeight = clampedCarto.height || 0;
-            const terrainHeight = terrainCarto ? (terrainCarto.height || 0) : 0;
-
-            point.obstacleHeight = obstacleHeight;
-            point.terrainHeight = terrainHeight;
-            point.buildingHeight = Math.max(0, obstacleHeight - terrainHeight);
-
-            if (point.buildingHeight > 1) {
-                buildingsDetected += 1;
-            }
-
-            maxObstacleHeight = Math.max(maxObstacleHeight, obstacleHeight);
-            maxBuildingHeight = Math.max(maxBuildingHeight, point.buildingHeight);
-        });
-
-        return {
-            grid,
-            maxObstacleHeight,
-            maxBuildingHeight,
-            buildingsDetected
-        };
-    }
-
-    function validateFAA(routeAnalysis, plannedAltitude, config) {
-        const violations = [];
-        let isValid = true;
-
-        for (const point of routeAnalysis.points) {
-            const agl = plannedAltitude - point.terrainHeight;
-            const clearance = plannedAltitude - point.obstacleHeight;
-
-            if (agl > config.FAA_MAX_ALTITUDE_AGL_M) {
-                violations.push({
-                    type: 'FAA_ALTITUDE_EXCEEDED',
-                    lat: point.lat,
-                    lon: point.lon,
-                    altitude: plannedAltitude,
-                    agl
-                });
-            }
-
-            if (clearance < config.DEFAULT_SAFETY_BUFFER_M) {
-                violations.push({
-                    type: 'OBSTACLE_CLEARANCE',
-                    lat: point.lat,
-                    lon: point.lon,
-                    altitude: plannedAltitude,
-                    clearance
-                });
-            }
-        }
-
-        if (violations.length > 0) {
-            isValid = false;
-        }
-
-        const suggestedAltitude = routeAnalysis.maxObstacleHeight + config.DEFAULT_SAFETY_BUFFER_M;
-        const minTerrain = Math.min(...routeAnalysis.points.map((p) => p.terrainHeight));
-        const suggestedAGL = suggestedAltitude - minTerrain;
-
-        return {
-            isValid,
-            violations,
-            suggestedAltitude,
-            suggestedAGL,
-            maxObstacleHeight: routeAnalysis.maxObstacleHeight,
-            faaCompliant: suggestedAGL <= config.FAA_MAX_ALTITUDE_AGL_M,
-            summary: isValid
-                ? `Route clear at ${plannedAltitude.toFixed(0)}m`
-                : `Route blocked by ${violations.length} violation(s)`
-        };
-    }
-
     async function focusCameraOnRoute(waypoints) {
         if (!state.viewer || waypoints.length < 2) return;
         const boundingSphere = Cesium.BoundingSphere.fromPoints(
@@ -451,239 +274,60 @@
         const plannedAltitude = Number.isFinite(config.plannedAltitude)
             ? config.plannedAltitude
             : normalized.reduce((sum, wp) => sum + wp.alt, 0) / normalized.length;
-        const geofences = Array.isArray(config.geofences) ? config.geofences : [];
 
         await loadOsmBuildings(config);
         await focusCameraOnRoute(normalized);
 
-        try {
-            const serverResult = await requestServerRoute(normalized, config);
-            const plannedWaypoints = (serverResult.waypoints || []).map((wp) => ({
-                lat: wp.lat,
-                lon: wp.lon,
-                alt: wp.altitude_m,
-                phase: wp.phase
-            }));
-            const hydratedWaypoints = await applyTerrainToServerWaypoints(plannedWaypoints);
-            const hazards = Array.isArray(serverResult.hazards) ? serverResult.hazards : [];
-            const maxObstacleHeight = hazards.reduce((max, hazard) => {
-                const height = Number.isFinite(hazard.height_m) ? hazard.height_m : 0;
-                return Math.max(max, height);
-            }, 0);
-            const stats = serverResult.stats || {};
-            const suggestedAltitude = Number.isFinite(stats.max_altitude)
-                ? stats.max_altitude
-                : plannedAltitude;
-            const maxAgl = Number.isFinite(stats.max_agl) ? stats.max_agl : null;
-            const samplePoints = Number.isFinite(serverResult.sample_points)
-                ? serverResult.sample_points
-                : (serverResult.nodes_visited || hydratedWaypoints.length);
+        const serverResult = await requestServerRoute(normalized, config);
+        const plannedWaypoints = (serverResult.waypoints || []).map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            alt: wp.altitude_m,
+            phase: wp.phase
+        }));
+        const hydratedWaypoints = await applyTerrainToServerWaypoints(plannedWaypoints);
+        const hazards = Array.isArray(serverResult.hazards) ? serverResult.hazards : [];
+        const maxObstacleHeight = hazards.reduce((max, hazard) => {
+            const height = Number.isFinite(hazard.height_m) ? hazard.height_m : 0;
+            return Math.max(max, height);
+        }, 0);
+        const stats = serverResult.stats || {};
+        const suggestedAltitude = Number.isFinite(stats.max_altitude)
+            ? stats.max_altitude
+            : plannedAltitude;
+        const maxAgl = Number.isFinite(stats.max_agl) ? stats.max_agl : null;
+        const samplePoints = Number.isFinite(serverResult.sample_points)
+            ? serverResult.sample_points
+            : (serverResult.nodes_visited || hydratedWaypoints.length);
 
-            return {
-                waypoints: hydratedWaypoints.length ? hydratedWaypoints : normalized,
-                originalWaypoints: normalized,
-                samplePoints,
-                plannedAltitude,
-                analysis: {
-                    points: [],
-                    maxObstacleHeight,
-                    maxBuildingHeight: maxObstacleHeight,
-                    hazards
-                },
-                validation: {
-                    isValid: true,
-                    violations: [],
-                    suggestedAltitude,
-                    suggestedAGL: maxAgl,
-                    maxObstacleHeight,
-                    maxBuildingHeight: maxObstacleHeight,
-                    faaCompliant: maxAgl !== null ? maxAgl <= config.FAA_MAX_ALTITUDE_AGL_M : true,
-                    summary: `Server route plan (${serverResult.optimized_points || plannedWaypoints.length} points)`
-                },
-                optimized: true,
-                optimization: {
-                    nodesVisited: serverResult.nodes_visited || 0,
-                    stats: serverResult.stats || null
-                },
-                timestamp: new Date().toISOString()
-            };
-        } catch (error) {
-            const message = error && error.message ? error.message : 'ATC route plan failed';
-            if (!config.ALLOW_LOCAL_FALLBACK) {
-                return {
-                    waypoints: [],
-                    originalWaypoints: normalized,
-                    samplePoints: 0,
-                    plannedAltitude,
-                    analysis: {
-                        points: [],
-                        maxObstacleHeight: 0,
-                        maxBuildingHeight: 0,
-                        hazards: []
-                    },
-                    validation: {
-                        isValid: false,
-                        violations: [message],
-                        suggestedAltitude: null,
-                        suggestedAGL: null,
-                        maxObstacleHeight: 0,
-                        maxBuildingHeight: 0,
-                        faaCompliant: false,
-                        summary: `ATC route plan failed: ${message}`
-                    },
-                    optimized: false,
-                    optimization: {
-                        nodesVisited: 0,
-                        stats: null
-                    },
-                    timestamp: new Date().toISOString()
-                };
-            }
-            console.warn('[RoutePlanner] Server route plan failed, using local planner:', error);
-        }
-
-        const spacing = resolveSampleSpacing(normalized, config);
-        let laneRadius = config.DEFAULT_LANE_RADIUS_M;
-        const maxRadius = Math.max(laneRadius, config.MAX_LANE_RADIUS_M);
-        const maxAttempts = Math.max(
-            1,
-            Math.ceil((maxRadius - laneRadius) / config.LANE_EXPANSION_STEP_M) + 1
-        );
-        let attempt = 0;
-        let result = null;
-        let lastGrid = null;
-        let lastAnalysis = null;
-        let lastValidation = null;
-
-        while (attempt < maxAttempts && !result) {
-            const laneOffsets = resolveLaneOffsets(config, laneRadius);
-            const grid = generateGridSamples(normalized, spacing, config, laneOffsets);
-            const analysis = await analyzeGrid(grid, config);
-            lastGrid = grid;
-            lastAnalysis = analysis;
-            if (!analysis) {
-                result = {
-                    waypoints: normalized,
-                    samplePoints: 0,
-                    plannedAltitude,
-                    analysis: { points: [], maxObstacleHeight: 0, maxBuildingHeight: 0 },
-                    validation: { isValid: false, violations: [], summary: 'Route analysis failed' },
-                    optimized: false,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-            }
-
-            const centerLaneIdx = Math.floor(grid.lanes.length / 2);
-            const centerLanePoints = grid.lanes[centerLaneIdx];
-            const centerAnalysis = {
-                points: centerLanePoints.map((point) => ({
-                    ...point,
-                    obstacleHeight: point.obstacleHeight,
-                    terrainHeight: point.terrainHeight,
-                    buildingHeight: point.buildingHeight || 0
-                })),
-                maxObstacleHeight: analysis.maxObstacleHeight,
-                maxBuildingHeight: analysis.maxBuildingHeight || 0
-            };
-
-            const straightValidation = validateFAA(centerAnalysis, plannedAltitude, config);
-            lastValidation = straightValidation;
-
-            if (straightValidation.isValid) {
-                result = {
-                    waypoints: normalized,
-                    samplePoints: grid.lanes[0].length * grid.lanes.length,
-                    plannedAltitude,
-                    analysis: centerAnalysis,
-                    validation: straightValidation,
-                    optimized: false,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-            }
-
-            if (!root.RouteEngine) {
-                result = {
-                    waypoints: normalized,
-                    samplePoints: grid.lanes[0].length * grid.lanes.length,
-                    plannedAltitude,
-                    analysis: centerAnalysis,
-                    validation: straightValidation,
-                    optimized: false,
-                    timestamp: new Date().toISOString(),
-                    warning: 'Route engine unavailable'
-                };
-                break;
-            }
-
-            if (typeof root.RouteEngine.configure === 'function') {
-                root.RouteEngine.configure({
-                    FAA_LIMIT_AGL: config.FAA_MAX_ALTITUDE_AGL_M,
-                    SAFETY_BUFFER_M: config.DEFAULT_SAFETY_BUFFER_M
-                });
-            }
-
-            const optimization = root.RouteEngine.optimizeFlightPath(normalized, grid, geofences);
-            if (!optimization.success) {
-                attempt += 1;
-                const nextRadius = Math.min(maxRadius, laneRadius + config.LANE_EXPANSION_STEP_M);
-                if (nextRadius <= laneRadius) {
-                    break;
-                }
-                laneRadius = nextRadius;
-                continue;
-            }
-
-            const validatedWaypoints = await root.RouteEngine.validateAndFixSegments(
-                optimization.waypoints,
-                state.viewer
-            );
-
-            result = {
-                waypoints: validatedWaypoints,
-                originalWaypoints: normalized,
-                samplePoints: grid.lanes[0].length * grid.lanes.length,
-                optimizedPoints: validatedWaypoints.length,
-                plannedAltitude: plannedAltitude,
-                analysis: centerAnalysis,
-                validation: {
-                    isValid: true,
-                    violations: [],
-                    suggestedAltitude: 0,
-                    suggestedAGL: 0,
-                    maxObstacleHeight: analysis.maxObstacleHeight,
-                    maxBuildingHeight: analysis.maxBuildingHeight || 0,
-                    faaCompliant: true,
-                    summary: `Optimized path with ${optimization.nodesVisited} nodes visited`
-                },
-                optimized: true,
-                optimization,
-                timestamp: new Date().toISOString()
-            };
-            break;
-        }
-
-        if (!result) {
-            const samplePoints = lastGrid && lastGrid.lanes.length
-                ? lastGrid.lanes[0].length * lastGrid.lanes.length
-                : 0;
-            result = {
-                waypoints: normalized,
-                samplePoints,
-                plannedAltitude,
-                analysis: lastAnalysis || { points: [], maxObstacleHeight: 0, maxBuildingHeight: 0 },
-                validation: lastValidation || {
-                    isValid: false,
-                    violations: [],
-                    summary: 'No valid path found'
-                },
-                optimized: false,
-                timestamp: new Date().toISOString()
-            };
-        }
-
-        return result;
+        return {
+            waypoints: hydratedWaypoints.length ? hydratedWaypoints : normalized,
+            originalWaypoints: normalized,
+            samplePoints,
+            plannedAltitude,
+            analysis: {
+                points: [],
+                maxObstacleHeight,
+                maxBuildingHeight: maxObstacleHeight,
+                hazards
+            },
+            validation: {
+                isValid: true,
+                violations: [],
+                suggestedAltitude,
+                suggestedAGL: maxAgl,
+                maxObstacleHeight,
+                maxBuildingHeight: maxObstacleHeight,
+                faaCompliant: maxAgl !== null ? maxAgl <= config.FAA_MAX_ALTITUDE_AGL_M : true,
+                summary: `Server route plan (${serverResult.optimized_points || plannedWaypoints.length} points)`
+            },
+            optimized: true,
+            optimization: {
+                nodesVisited: serverResult.nodes_visited || 0,
+                stats: serverResult.stats || null
+            },
+            timestamp: new Date().toISOString()
+        };
     }
 
     async function init(viewer, options = {}) {

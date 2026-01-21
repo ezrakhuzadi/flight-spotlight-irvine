@@ -46,6 +46,16 @@
             osmBuildingsAssetId: <%- JSON.stringify(osmBuildingsAssetId || null) %>
         };
     </script>
+    <script>
+        window.escapeHtml = window.escapeHtml || function (value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+    </script>
     <!-- Core Scripts -->
     <script src="/assets/js/api-client.js"></script>
     <%- typeof scripts !== 'undefined' ? scripts : '' %>

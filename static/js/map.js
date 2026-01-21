@@ -9,6 +9,8 @@
     const statusUtils = window.ATCStatus || {
         getStatusClass: () => 'online'
     };
+    const utils = window.ATCUtils;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     // ========================================================================
     // Configuration
@@ -37,6 +39,31 @@
             daa: 4000
         }
     };
+
+    function offsetByBearing(lat, lon, distanceM, bearingRad) {
+        const earthRadiusM = 6371000;
+        const lat1 = Cesium.Math.toRadians(lat);
+        const lon1 = Cesium.Math.toRadians(lon);
+        const angularDistance = distanceM / earthRadiusM;
+
+        const sinLat1 = Math.sin(lat1);
+        const cosLat1 = Math.cos(lat1);
+        const sinAd = Math.sin(angularDistance);
+        const cosAd = Math.cos(angularDistance);
+
+        const sinLat2 = sinLat1 * cosAd + cosLat1 * sinAd * Math.cos(bearingRad);
+        const lat2 = Math.asin(Math.max(-1, Math.min(1, sinLat2)));
+
+        const y = Math.sin(bearingRad) * sinAd * cosLat1;
+        const x = cosAd - sinLat1 * sinLat2;
+        let lon2 = lon1 + Math.atan2(y, x);
+        lon2 = ((lon2 + Math.PI) % (2 * Math.PI)) - Math.PI;
+
+        return {
+            lat: Cesium.Math.toDegrees(lat2),
+            lon: Cesium.Math.toDegrees(lon2)
+        };
+    }
 
     // ========================================================================
     // State
@@ -792,9 +819,17 @@
 
             // Update heading arrow
             const headingRad = Cesium.Math.toRadians(heading || 0);
-            const arrowEndLat = validLat + (CONFIG.HEADING_ARROW_LENGTH_M / 111320) * Math.cos(headingRad);
-            const arrowEndLon = validLon + (CONFIG.HEADING_ARROW_LENGTH_M / (111320 * Math.cos(validLat * Math.PI / 180))) * Math.sin(headingRad);
-            const arrowEnd = Cesium.Cartesian3.fromDegrees(arrowEndLon, arrowEndLat, validAlt);
+            const arrowEndGeo = offsetByBearing(
+                validLat,
+                validLon,
+                CONFIG.HEADING_ARROW_LENGTH_M,
+                headingRad
+            );
+            const arrowEnd = Cesium.Cartesian3.fromDegrees(
+                arrowEndGeo.lon,
+                arrowEndGeo.lat,
+                validAlt
+            );
 
             if (!headingArrows.has(droneId)) {
                 const arrowColor = getTrafficArrowColor(source);
@@ -1114,24 +1149,24 @@
             const isExternal = isExternalSource(drone.traffic_source);
             const conformance = conformanceStatuses.get(drone.drone_id);
             const conformanceStatus = conformance?.status || 'unknown';
-            const conformanceClass = getConformanceClass(conformanceStatus);
+            const conformanceClass = utils.getConformanceClass(conformanceStatus);
             const daa = daaByDrone.get(drone.drone_id);
             const daaBadge = daa
-                ? `<span class="status-badge ${getDaaClass(daa.severity)}" style="margin-left: 4px;">${formatDaaSeverity(daa.severity)}</span>`
+                ? `<span class="status-badge ${getDaaClass(daa.severity)}" style="margin-left: 4px;">${escapeHtml(formatDaaSeverity(daa.severity))}</span>`
                 : '';
             const sourceBadge = isExternal
                 ? `<span class="status-badge pending" style="margin-left: 4px;">RID</span>`
                 : '';
             const statusLine = isExternal
                 ? `<span class="status-badge warn">external</span>${sourceBadge}`
-                : `<span class="status-badge ${conformanceClass}">${conformanceStatus}</span>${daaBadge}`;
+                : `<span class="status-badge ${conformanceClass}">${escapeHtml(conformanceStatus)}</span>${daaBadge}`;
             return `
                 <div class="drone-track-item ${selectedDroneId === drone.drone_id ? 'selected' : ''}" 
-                     onclick="MapControl.selectDrone('${drone.drone_id}')">
+                     data-drone-id="${escapeHtml(drone.drone_id)}">
                     <span class="status-dot ${getStatusClass(drone.status)}"></span>
                     <div class="list-item-content">
-                        <div class="list-item-title" style="font-size: 13px;">${drone.drone_id}</div>
-                        <div class="list-item-subtitle" style="font-size: 11px;">${drone.altitude_m.toFixed(0)}m | ${drone.speed_mps.toFixed(1)} m/s</div>
+                        <div class="list-item-title" style="font-size: 13px;">${escapeHtml(drone.drone_id)}</div>
+                        <div class="list-item-subtitle" style="font-size: 11px;">${escapeHtml(drone.altitude_m.toFixed(0))}m | ${escapeHtml(drone.speed_mps.toFixed(1))} m/s</div>
                         <div class="list-item-subtitle" style="font-size: 11px;">
                             ${statusLine}
                         </div>
@@ -1139,6 +1174,15 @@
                 </div>
             `;
         }).join('');
+
+        container.querySelectorAll('.drone-track-item').forEach((item) => {
+            item.addEventListener('click', () => {
+                const id = item.dataset.droneId;
+                if (id) {
+                    selectDrone(id);
+                }
+            });
+        });
     }
 
     function updateConflictsList(conflicts) {
@@ -1159,9 +1203,9 @@
             <div class="list-item" style="padding: 8px; background: rgba(239,68,68,0.1); border-color: var(--accent-red); margin-bottom: 4px;">
                 <div class="list-item-content">
                     <div class="list-item-title text-danger" style="font-size: 12px;">
-                        ${c.drone1_id} - ${c.drone2_id}
+                        ${escapeHtml(c.drone1_id)} - ${escapeHtml(c.drone2_id)}
                     </div>
-                    <div class="list-item-subtitle">${c.distance_m.toFixed(0)}m apart</div>
+                    <div class="list-item-subtitle">${escapeHtml(c.distance_m.toFixed(0))}m apart</div>
                 </div>
             </div>
         `).join('');
@@ -1216,20 +1260,29 @@
         }
 
         container.innerHTML = advisories.map(advisory => {
-            const severityLabel = formatDaaSeverity(advisory.severity);
-            const actionLabel = (advisory.action || 'monitor').toUpperCase();
-            const sourceLabel = (advisory.source || 'system').toUpperCase();
-            const description = advisory.description || 'DAA advisory active';
+            const severityLabel = escapeHtml(formatDaaSeverity(advisory.severity));
+            const actionLabel = escapeHtml((advisory.action || 'monitor').toUpperCase());
+            const sourceLabel = escapeHtml((advisory.source || 'system').toUpperCase());
+            const description = escapeHtml(advisory.description || 'DAA advisory active');
             return `
-                <div class="list-item" style="padding: 8px; margin-bottom: 6px;" onclick="MapControl.selectDrone('${advisory.drone_id}')">
+                <div class="list-item" style="padding: 8px; margin-bottom: 6px;" data-drone-id="${escapeHtml(advisory.drone_id)}">
                     <div class="list-item-content">
-                        <div class="list-item-title" style="font-size: 12px;">${advisory.drone_id} • ${sourceLabel}</div>
+                        <div class="list-item-title" style="font-size: 12px;">${escapeHtml(advisory.drone_id)} • ${sourceLabel}</div>
                         <div class="list-item-subtitle" style="font-size: 11px;">${actionLabel} - ${description}</div>
                     </div>
                     <span class="status-badge ${getDaaClass(advisory.severity)}">${severityLabel}</span>
                 </div>
             `;
         }).join('');
+
+        container.querySelectorAll('.list-item[data-drone-id]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const id = item.dataset.droneId;
+                if (id) {
+                    selectDrone(id);
+                }
+            });
+        });
     }
 
     function showSelectedDronePanel(show) {
@@ -1332,17 +1385,6 @@
 
     function getStatusClass(status) {
         return statusUtils.getStatusClass(status);
-    }
-
-    function getConformanceClass(status) {
-        switch (status) {
-            case 'conforming':
-                return 'pass';
-            case 'nonconforming':
-                return 'fail';
-            default:
-                return 'warn';
-        }
     }
 
     function normalizeDaaSeverity(severity) {

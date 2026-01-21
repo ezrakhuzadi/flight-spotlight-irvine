@@ -292,9 +292,12 @@
         .validation-stat {
             display: flex;
             justify-content: space-between;
+            gap: 8px;
             padding: 8px 0;
             border-bottom: 1px solid var(--border);
             font-size: 0.85rem;
+            align-items: flex-start;
+            flex-wrap: wrap;
         }
 
         .validation-stat:last-child {
@@ -308,6 +311,9 @@
         .validation-stat .value {
             font-weight: 600;
             font-family: 'JetBrains Mono', monospace;
+            text-align: right;
+            max-width: 65%;
+            word-break: break-word;
         }
 
         .validation-stat .value.good {
@@ -868,8 +874,8 @@
                 <!-- Validation Card -->
                 <div class="card">
                     <div class="card-header">
-                        <span class="icon">FAA</span>
-                        <span>FAA Validation</span>
+                        <span class="icon">ATC</span>
+                        <span>Compliance Check</span>
                     </div>
 
                     <div id="statusPanel" class="status-panel pending">
@@ -890,8 +896,16 @@
                             <span id="suggestedAlt" class="value">-</span>
                         </div>
                         <div class="validation-stat">
-                            <span class="label">FAA Compliant</span>
-                            <span id="faaCompliant" class="value">-</span>
+                            <span class="label">Compliance</span>
+                            <span id="complianceStatus" class="value">-</span>
+                        </div>
+                        <div class="validation-stat">
+                            <span class="label">Blocking Checks</span>
+                            <span id="complianceBlocking" class="value">-</span>
+                        </div>
+                        <div class="validation-stat">
+                            <span class="label">Blocking Reasons</span>
+                            <span id="complianceIssues" class="value">-</span>
                         </div>
                         <div class="validation-stat">
                             <span class="label">Geofences</span>
@@ -1007,8 +1021,22 @@
         // Configuration
         // ========================================================================
 
-        // REPLACE WITH YOUR CESIUM ION TOKEN
-        const CESIUM_ION_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNzYzZDA0ZC0xMzM2LTRiZDYtOTlmYi00YWZlYWIyMmIzZDQiLCJpZCI6Mzc5MzIwLCJpYXQiOjE3Njg1MTI0NTV9.SFfIGeLNyHKRsAD8oJdDHpNibeSoxx_ISirSN1-xKdg';
+        // Pull the Cesium Ion token from the host app when available.
+        const CESIUM_ION_TOKEN = (() => {
+            const localConfig = window.__CESIUM_CONFIG__ || {};
+            if (localConfig.ionToken) {
+                return localConfig.ionToken;
+            }
+            try {
+                const parentConfig = window.parent && window.parent !== window ? window.parent.__CESIUM_CONFIG__ : null;
+                if (parentConfig && parentConfig.ionToken) {
+                    return parentConfig.ionToken;
+                }
+            } catch (err) {
+                // Ignore cross-origin access errors.
+            }
+            return '';
+        })();
 
         // ========================================================================
         // State
@@ -1047,12 +1075,27 @@
         function updateValidationUI(result) {
             const statusPanel = document.getElementById('statusPanel');
             const validationResult = document.getElementById('validationResult');
+            const complianceStatusEl = document.getElementById('complianceStatus');
+            const complianceBlockingEl = document.getElementById('complianceBlocking');
+            const complianceIssuesEl = document.getElementById('complianceIssues');
             const geofenceStatusEl = document.getElementById('geofenceStatus');
 
             if (!result) {
                 statusPanel.className = 'status-panel pending';
                 statusPanel.textContent = 'Add at least 2 waypoints to calculate route';
                 validationResult.style.display = 'none';
+                if (complianceStatusEl) {
+                    complianceStatusEl.textContent = '-';
+                    complianceStatusEl.className = 'value';
+                }
+                if (complianceBlockingEl) {
+                    complianceBlockingEl.textContent = '-';
+                    complianceBlockingEl.className = 'value';
+                }
+                if (complianceIssuesEl) {
+                    complianceIssuesEl.textContent = '-';
+                    complianceIssuesEl.className = 'value';
+                }
                 if (geofenceStatusEl) {
                     geofenceStatusEl.textContent = '-';
                     geofenceStatusEl.className = 'value';
@@ -1061,24 +1104,118 @@
                 return;
             }
 
-            // Update status
-            if (result.validation.isValid) {
-                statusPanel.className = 'status-panel valid';
-                statusPanel.textContent = result.validation.summary;
-            } else {
-                statusPanel.className = 'status-panel invalid';
-                statusPanel.textContent = result.validation.summary;
+            const validation = result.validation || {};
+            let complianceOk = null;
+            let complianceText = 'PENDING';
+            let complianceClass = 'value warning';
+            let panelClass = 'status-panel calculating';
+            let panelText = 'Compliance check pending';
+            let blockingChecks = [];
+            let blockingReasons = [];
+            let compliancePending = !result.complianceCheck;
+
+            const complianceCheck = result.complianceCheck;
+            if (complianceCheck) {
+                compliancePending = !!complianceCheck.pending;
+                if (complianceCheck.failed) {
+                    complianceText = 'CHECK FAILED';
+                    complianceClass = 'value bad';
+                    panelClass = 'status-panel invalid';
+                    panelText = complianceCheck.message || 'Compliance check failed';
+                    blockingChecks = ['Compliance'];
+                    if (complianceCheck.message) {
+                        blockingReasons.push(`Compliance: ${complianceCheck.message}`);
+                    }
+                } else if (complianceCheck.report && complianceCheck.report.overall_status) {
+                    const status = String(complianceCheck.report.overall_status).toLowerCase();
+                    complianceText = status.toUpperCase();
+                    complianceOk = complianceCheck.ok === true;
+                    const checks = complianceCheck.report.checks || {};
+                    const checkOrder = [
+                        ['weather', 'Weather'],
+                        ['battery', 'Battery'],
+                        ['population', 'Population'],
+                        ['obstacles', 'Obstacles']
+                    ];
+                    checkOrder.forEach(([key, label]) => {
+                        const entry = checks[key] || {};
+                        const entryStatus = String(entry.status || 'pending').toLowerCase();
+                        if (entryStatus === 'fail' || entryStatus === 'pending') {
+                            blockingChecks.push(label);
+                            if (entry.message) {
+                                blockingReasons.push(`${label}: ${entry.message}`);
+                            } else {
+                                blockingReasons.push(`${label}: ${entryStatus.toUpperCase()}`);
+                            }
+                        }
+                    });
+                    if (status === 'pass') {
+                        complianceClass = 'value good';
+                        panelClass = 'status-panel valid';
+                        panelText = 'Compliance PASS';
+                    } else if (status === 'warn') {
+                        complianceClass = 'value warning';
+                        panelClass = 'status-panel calculating';
+                        panelText = 'Compliance WARN';
+                    } else if (status === 'fail') {
+                        complianceClass = 'value bad';
+                        panelClass = 'status-panel invalid';
+                        panelText = 'Compliance FAIL';
+                    } else {
+                        complianceClass = 'value warning';
+                        panelClass = 'status-panel calculating';
+                        panelText = 'Compliance PENDING';
+                    }
+                } else if (typeof complianceCheck.ok === 'boolean') {
+                    complianceOk = complianceCheck.ok;
+                    complianceText = complianceOk ? 'PASS' : 'FAIL';
+                    complianceClass = complianceOk ? 'value good' : 'value bad';
+                    panelClass = complianceOk ? 'status-panel valid' : 'status-panel invalid';
+                    panelText = complianceOk ? 'Compliance PASS' : 'Compliance FAIL';
+                }
             }
+
+            if (!complianceCheck && validation.summary) {
+                panelClass = validation.isValid ? 'status-panel valid' : 'status-panel invalid';
+                panelText = validation.summary;
+            }
+
+            if (Array.isArray(complianceCheck?.blocking) && complianceCheck.blocking.length) {
+                const mappedBlocking = complianceCheck.blocking.map((item) => {
+                    const label = String(item || '').toLowerCase();
+                    if (label === 'weather') return 'Weather';
+                    if (label === 'battery') return 'Battery';
+                    if (label === 'population') return 'Population';
+                    if (label === 'obstacles') return 'Obstacles';
+                    return label ? label.toUpperCase() : 'UNKNOWN';
+                });
+                if (!blockingChecks.length) {
+                    blockingChecks = mappedBlocking;
+                } else {
+                    const combined = new Set([...blockingChecks, ...mappedBlocking]);
+                    blockingChecks = Array.from(combined);
+                }
+            }
+
+            if (blockingChecks.length && /Compliance (FAIL|PENDING)/.test(panelText)) {
+                panelText = `${panelText}: ${blockingChecks.join(', ')}`;
+            }
+
+            statusPanel.className = panelClass;
+            statusPanel.textContent = panelText;
 
             // Show validation stats
             validationResult.style.display = 'block';
-            document.getElementById('samplePoints').textContent = result.samplePoints;
+            const samplePoints = Number.isFinite(result.samplePoints) ? result.samplePoints : '-';
+            document.getElementById('samplePoints').textContent = samplePoints;
 
-            const maxObs = result.analysis.maxObstacleHeight;
+            const maxObs = Number.isFinite(result.analysis?.maxObstacleHeight)
+                ? result.analysis.maxObstacleHeight
+                : 0;
             document.getElementById('maxObstacle').textContent = `${maxObs.toFixed(1)}m`;
             document.getElementById('maxObstacle').className = `value ${maxObs > 100 ? 'warning' : 'good'}`;
 
-            const suggested = result.validation.suggestedAltitude;
+            const suggested = validation.suggestedAltitude;
             if (suggested !== null && suggested !== undefined) {
                 document.getElementById('suggestedAlt').textContent = `${suggested.toFixed(0)}m`;
                 document.getElementById('suggestedAlt').className = `value ${suggested > 121 ? 'bad' : 'good'}`;
@@ -1086,10 +1223,30 @@
                 document.getElementById('suggestedAlt').textContent = 'N/A (Reroute)';
                 document.getElementById('suggestedAlt').className = 'value bad';
             }
-
-            const compliant = result.validation.faaCompliant;
-            document.getElementById('faaCompliant').textContent = compliant ? 'YES' : 'NO';
-            document.getElementById('faaCompliant').className = `value ${compliant ? 'good' : 'bad'}`;
+            if (complianceStatusEl) {
+                complianceStatusEl.textContent = complianceText;
+                complianceStatusEl.className = complianceClass;
+            }
+            if (complianceBlockingEl) {
+                const blockingText = compliancePending
+                    ? 'PENDING'
+                    : (blockingChecks.length ? blockingChecks.join(', ') : 'None');
+                const blockingClass = compliancePending
+                    ? 'value warning'
+                    : (blockingChecks.length ? 'value bad' : 'value good');
+                complianceBlockingEl.textContent = blockingText;
+                complianceBlockingEl.className = blockingClass;
+            }
+            if (complianceIssuesEl) {
+                const issuesText = compliancePending
+                    ? 'PENDING'
+                    : (blockingReasons.length ? blockingReasons.join(' | ') : 'None');
+                const issuesClass = compliancePending
+                    ? 'value warning'
+                    : (blockingReasons.length ? 'value bad' : 'value good');
+                complianceIssuesEl.textContent = issuesText;
+                complianceIssuesEl.className = issuesClass;
+            }
 
             const geofenceCheck = result.geofenceCheck;
             let geofenceClear = false;
@@ -1117,7 +1274,7 @@
             document.getElementById('pathType').className = `value ${optimized ? 'warning' : 'good'}`;
 
             // Enable submit if valid
-            document.getElementById('submitBtn').disabled = !(result.validation.isValid && geofenceClear);
+            document.getElementById('submitBtn').disabled = !(complianceOk === true && geofenceClear);
         }
 
         // ========================================================================
@@ -1155,6 +1312,28 @@
             updateValidationUI(routeData);
         }
 
+        async function refreshComplianceCheck(routeData) {
+            if (!routeData || !window.FlightPlanner || typeof window.FlightPlanner.evaluateCompliance !== 'function') {
+                return;
+            }
+
+            routeData.complianceCheck = { pending: true };
+            updateValidationUI(routeData);
+
+            try {
+                const response = await window.FlightPlanner.evaluateCompliance(routeData.waypoints || []);
+                routeData.complianceCheck = response;
+            } catch (error) {
+                routeData.complianceCheck = {
+                    ok: false,
+                    failed: true,
+                    message: error.message || 'Compliance check failed'
+                };
+            }
+
+            updateValidationUI(routeData);
+        }
+
         // Callback when waypoints are cleared
         window.onWaypointsCleared = function () {
             updateWaypointList([]);
@@ -1167,6 +1346,7 @@
             currentRouteData = result;
             updateValidationUI(result);
             refreshGeofenceCheck(result);
+            refreshComplianceCheck(result);
         };
 
         // Callback when flight is submitted
@@ -1195,17 +1375,17 @@
                     throw new Error('Resolve all waypoints before calculating');
                 }
                 const result = await FlightPlanner.calculateRoute();
-                if (!result || !result.validation || !result.validation.isValid) {
-                    const message = result && result.validation && result.validation.summary
-                        ? result.validation.summary
-                        : 'Route analysis failed';
-                    showToast(message, 'error');
+                if (!result) {
+                    showToast('Route analysis failed', 'error');
                 } else {
                     showToast('Route analysis complete', 'success');
                 }
             } catch (error) {
-                showToast(error.message, 'error');
+                const message = error && error.message ? error.message : 'Route analysis failed';
+                showToast(message, 'error');
                 updateValidationUI(null);
+                statusPanel.className = 'status-panel invalid';
+                statusPanel.textContent = message;
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Calculate Route';

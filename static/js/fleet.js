@@ -12,6 +12,8 @@
         getStatusClass: () => 'online',
         getStatusLabel: (status) => status || 'Unknown'
     };
+    const utils = window.ATCUtils;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
     let selectedDroneId = null;
     let conformanceByDrone = new Map();
     let registerInFlight = false;
@@ -72,32 +74,50 @@
         container.innerHTML = drones.map(drone => {
             const conformance = conformanceMap?.get(drone.drone_id);
             const conformanceStatus = conformance?.status || 'unknown';
-            const conformanceClass = getConformanceClass(conformanceStatus);
+            const conformanceClass = utils.getConformanceClass(conformanceStatus);
             const statusLabel = statusUtils.getStatusLabel(drone.status);
             return `
-            <div class="list-item" data-drone-id="${drone.drone_id}">
+            <div class="list-item" data-drone-id="${escapeHtml(drone.drone_id)}">
                 <span class="status-dot ${getStatusClass(drone.status)}"></span>
                 <div class="list-item-content">
-                    <div class="list-item-title">${drone.drone_id}</div>
+                    <div class="list-item-title">${escapeHtml(drone.drone_id)}</div>
                     <div class="list-item-subtitle">
-                        Status: ${statusLabel} | 
-                        Position: ${drone.lat.toFixed(4)}, ${drone.lon.toFixed(4)} @ ${drone.altitude_m.toFixed(0)}m |
-                        Speed: ${drone.speed_mps.toFixed(1)} m/s
+                        Status: ${escapeHtml(statusLabel)} | 
+                        Position: ${escapeHtml(drone.lat.toFixed(4))}, ${escapeHtml(drone.lon.toFixed(4))} @ ${escapeHtml(drone.altitude_m.toFixed(0))}m |
+                        Speed: ${escapeHtml(drone.speed_mps.toFixed(1))} m/s
                     </div>
                 </div>
                 <div class="list-item-actions">
-                    <span class="status-badge ${getStatusClass(drone.status)}">${statusLabel}</span>
-                    <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
-                    <button class="btn btn-ghost btn-sm" onclick="Fleet.viewOnMap('${drone.drone_id}')">
+                    <span class="status-badge ${getStatusClass(drone.status)}">${escapeHtml(statusLabel)}</span>
+                    <span class="status-badge ${conformanceClass}">${escapeHtml(conformanceStatus)}</span>
+                    <button class="btn btn-ghost btn-sm" data-action="map" data-id="${escapeHtml(drone.drone_id)}">
                         Map
                     </button>
-                    <button class="btn btn-ghost btn-sm" onclick="Fleet.showDetails('${drone.drone_id}')">
+                    <button class="btn btn-ghost btn-sm" data-action="details" data-id="${escapeHtml(drone.drone_id)}">
                         Details
                     </button>
                 </div>
             </div>
         `;
         }).join('');
+
+        container.querySelectorAll('button[data-action="map"]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                if (id) {
+                    window.Fleet.viewOnMap(id);
+                }
+            });
+        });
+
+        container.querySelectorAll('button[data-action="details"]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                if (id) {
+                    window.Fleet.showDetails(id);
+                }
+            });
+        });
     }
 
     async function registerDrone() {
@@ -134,7 +154,7 @@
             const drone = drones.find(d => d.drone_id === droneId);
             const conformance = conformanceByDrone.get(droneId);
             const conformanceStatus = conformance?.status || 'unknown';
-            const conformanceClass = getConformanceClass(conformanceStatus);
+            const conformanceClass = utils.getConformanceClass(conformanceStatus);
             if (drone && contentEl) {
                 const statusLabel = statusUtils.getStatusLabel(drone.status);
                 contentEl.innerHTML = `
@@ -204,17 +224,6 @@
 
     function getStatusClass(status) {
         return statusUtils.getStatusClass(status);
-    }
-
-    function getConformanceClass(status) {
-        switch (status) {
-            case 'conforming':
-                return 'pass';
-            case 'nonconforming':
-                return 'fail';
-            default:
-                return 'warn';
-        }
     }
 
     // Initialize

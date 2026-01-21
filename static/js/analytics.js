@@ -9,26 +9,17 @@
     const COMPLETED_STATES = new Set([5, 6, 7, 8]);
     const SUCCESS_STATES = new Set([5]);
     const DAY_MS = 24 * 60 * 60 * 1000;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     let charts = {};
     let latestReport = null;
-
-    function getOwnerContext() {
-        const user = window.APP_USER;
-        if (!user || user.role === 'authority') return null;
-        const email = (user.email || '').trim().toLowerCase();
-        return { id: user.id || null, email: email || null };
-    }
-
-    function normalizeEmail(value) {
-        return String(value || '').trim().toLowerCase();
-    }
+    const utils = window.ATCUtils;
 
     function filterDeclarationsByOwner(declarations, owner, droneIds) {
         if (!owner) return declarations;
         return (declarations || []).filter((decl) => {
             const emailMatch = owner.email
-                && normalizeEmail(decl?.submitted_by) === owner.email;
+                && utils.normalizeEmail(decl?.submitted_by) === owner.email;
             const droneId = decl?.aircraft_id || '';
             const droneMatch = droneId && droneIds.has(droneId);
             return emailMatch || droneMatch;
@@ -58,7 +49,7 @@
         setLoadingState();
 
         const range = getDateRange();
-        const owner = getOwnerContext();
+        const owner = utils.getOwnerContext();
         const ownerId = owner?.id || null;
         const [declarations, conflicts, conformance, drones, geofences] = await Promise.all([
             API.getFlightDeclarations().catch(() => []),
@@ -423,11 +414,11 @@
             const status = getDroneStatus(drone.status);
             return `
                 <tr>
-                    <td>${drone.id}</td>
-                    <td>${drone.flights}</td>
-                    <td>${formatDistance(drone.distanceKm)}</td>
-                    <td>${formatUptime(drone.lastUpdate, drone.status)}</td>
-                    <td><span class="status-badge ${status.className}">${status.label}</span></td>
+                    <td>${escapeHtml(drone.id)}</td>
+                    <td>${escapeHtml(drone.flights)}</td>
+                    <td>${escapeHtml(formatDistance(drone.distanceKm))}</td>
+                    <td>${escapeHtml(formatUptime(drone.lastUpdate, drone.status))}</td>
+                    <td><span class="status-badge ${status.className}">${escapeHtml(status.label)}</span></td>
                 </tr>
             `;
         }).join('');
@@ -450,10 +441,10 @@
             return `
                 <div class="list-item" style="padding: 8px 12px;">
                     <div class="list-item-content">
-                        <div class="list-item-title">${event.title}</div>
-                        <div class="list-item-subtitle">${event.subtitle}</div>
+                        <div class="list-item-title">${escapeHtml(event.title)}</div>
+                        <div class="list-item-subtitle">${escapeHtml(event.subtitle)}</div>
                     </div>
-                    <span class="text-muted" style="font-size: 11px;">${formatRelativeTime(event.timestamp)}</span>
+                    <span class="text-muted" style="font-size: 11px;">${escapeHtml(formatRelativeTime(event.timestamp))}</span>
                 </div>
             `;
         }).join('');
@@ -571,7 +562,7 @@
             const start = parseDate(decl.start_datetime || decl.start_time || decl.start_date || decl.created_at);
             const end = parseDate(decl.end_datetime || decl.end_time || decl.end_date || decl.updated_at);
             const durationSec = start && end ? Math.max(0, (end - start) / 1000) : 0;
-            const geojson = extractGeoJson(decl);
+            const geojson = utils.extractGeoJson(decl);
             const distanceM = geojson ? computeGeoJsonDistance(geojson) : 0;
             const name = decl.originating_party || decl.purpose || decl.flight_id || decl.id || 'Mission';
             return {
@@ -586,21 +577,6 @@
                 distanceM
             };
         });
-    }
-
-    function extractGeoJson(decl) {
-        const raw = decl.flight_declaration_geojson
-            || decl.flight_declaration_geo_json
-            || decl.flight_declaration_raw_geojson
-            || null;
-
-        if (!raw) return null;
-        if (typeof raw === 'object') return raw;
-        try {
-            return JSON.parse(raw);
-        } catch (error) {
-            return null;
-        }
     }
 
     function computeGeoJsonDistance(geojson) {
@@ -640,23 +616,9 @@
             const [lon1, lat1] = coords[i - 1] || [];
             const [lon2, lat2] = coords[i] || [];
             if (!isFinite(lat1) || !isFinite(lon1) || !isFinite(lat2) || !isFinite(lon2)) continue;
-            total += haversine(lat1, lon1, lat2, lon2);
+            total += utils.haversineMeters(lat1, lon1, lat2, lon2);
         }
         return total;
-    }
-
-    function haversine(lat1, lon1, lat2, lon2) {
-        const R = 6371000;
-        const phi1 = lat1 * Math.PI / 180;
-        const phi2 = lat2 * Math.PI / 180;
-        const dphi = (lat2 - lat1) * Math.PI / 180;
-        const dlambda = (lon2 - lon1) * Math.PI / 180;
-
-        const a = Math.sin(dphi / 2) * Math.sin(dphi / 2)
-            + Math.cos(phi1) * Math.cos(phi2)
-            * Math.sin(dlambda / 2) * Math.sin(dlambda / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
     }
 
     function parseDate(value) {

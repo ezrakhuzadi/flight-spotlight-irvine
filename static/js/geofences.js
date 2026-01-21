@@ -17,6 +17,7 @@
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.66, lon: -117.84, height: 8000 }
     };
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     // ========================================================================
     // State
@@ -159,7 +160,7 @@
         if (lastLoadError) {
             container.innerHTML = `
                 <div class="empty-state" style="padding: 12px;">
-                    <div class="empty-state-text text-muted">${lastLoadError}</div>
+                    <div class="empty-state-text text-muted">${escapeHtml(lastLoadError)}</div>
                 </div>
             `;
             return;
@@ -182,27 +183,55 @@
             const actionButtons = canManage
                 ? `
                     <div class="flex gap-sm">
-                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); GeofenceControl.toggle('${gf.id}')">
+                        <button class="btn btn-ghost btn-sm" data-action="toggle" data-id="${escapeHtml(gf.id)}">
                             ${gf.active === false ? 'Enable' : 'Disable'}
                         </button>
-                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); GeofenceControl.remove('${gf.id}')">
+                        <button class="btn btn-danger btn-sm" data-action="remove" data-id="${escapeHtml(gf.id)}">
                             Delete
                         </button>
                     </div>
                 `
                 : '';
             return `
-                <div class="geofence-item" data-type="${filterType}" data-id="${gf.id}"
-                    onclick="GeofenceControl.focus('${gf.id}')">
+                <div class="geofence-item" data-type="${escapeHtml(filterType)}" data-id="${escapeHtml(gf.id)}">
                     <span class="status-dot" style="background: ${colors.dot};"></span>
                     <div class="list-item-content">
-                        <div class="list-item-title">${gf.name}</div>
-                        <div class="list-item-subtitle">${label} | ${gf.lower_altitude_m || 0}-${gf.upper_altitude_m || 0}m | ${statusLabel}</div>
+                        <div class="list-item-title">${escapeHtml(gf.name)}</div>
+                        <div class="list-item-subtitle">${escapeHtml(label)} | ${escapeHtml(gf.lower_altitude_m || 0)}-${escapeHtml(gf.upper_altitude_m || 0)}m | ${escapeHtml(statusLabel)}</div>
                     </div>
                     ${actionButtons}
                 </div>
             `;
         }).join('');
+
+        container.querySelectorAll('.geofence-item').forEach((item) => {
+            item.addEventListener('click', () => {
+                const id = item.dataset.id;
+                if (id) {
+                    GeofenceControl.focus(id);
+                }
+            });
+        });
+
+        container.querySelectorAll('button[data-action="toggle"]').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const id = btn.dataset.id;
+                if (id) {
+                    GeofenceControl.toggle(id);
+                }
+            });
+        });
+
+        container.querySelectorAll('button[data-action="remove"]').forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const id = btn.dataset.id;
+                if (id) {
+                    GeofenceControl.remove(id);
+                }
+            });
+        });
     }
 
     function resetView() {

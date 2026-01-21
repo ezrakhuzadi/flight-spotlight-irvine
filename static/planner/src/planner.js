@@ -73,9 +73,9 @@
 
     function resolveAtcBase() {
         const candidates = [
-            CONFIG.ATC_SERVER_URL,
             root.__ATC_API_BASE__,
-            safeParentValue('__ATC_API_BASE__')
+            safeParentValue('__ATC_API_BASE__'),
+            CONFIG.ATC_SERVER_URL
         ];
         for (const candidate of candidates) {
             if (typeof candidate === 'string' && candidate.trim()) {
@@ -83,6 +83,16 @@
             }
         }
         return ATC_BASE_FALLBACK;
+    }
+
+    function resolveComplianceClearance() {
+        const complianceLimits = root.__ATC_COMPLIANCE_LIMITS__
+            || safeParentValue('__ATC_COMPLIANCE_LIMITS__')
+            || {};
+        const clearance = Number.isFinite(complianceLimits.defaultClearanceM)
+            ? complianceLimits.defaultClearanceM
+            : CONFIG.DEFAULT_SAFETY_BUFFER_M;
+        return clearance;
     }
 
     function joinUrl(base, path) {
@@ -144,6 +154,51 @@
         if (!response.ok) {
             const text = await response.text();
             throw new Error(text || `Geofence route check failed: ${response.status}`);
+        }
+        return response.json();
+    }
+
+    async function evaluateCompliance(waypoints) {
+        const base = resolveAtcBase();
+        const url = joinUrl(base, '/v1/compliance/evaluate');
+        const cruiseSpeed = CONFIG.DRONE_SPEED_MPS;
+        const defaultClearance = resolveComplianceClearance();
+        const routeWaypoints = (waypoints || []).map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            alt: Number.isFinite(wp.alt) ? wp.alt : 0
+        }));
+        const waypointsWithTime = calculateTimeOffsets(routeWaypoints, cruiseSpeed);
+        const battery = estimateBatteryMetrics(waypointsWithTime);
+        const metadata = {
+            drone_speed_mps: cruiseSpeed,
+            battery_capacity_min: battery.capacityMin,
+            battery_reserve_min: battery.reserveMin,
+            clearance_m: defaultClearance,
+            operation_type: 1
+        };
+
+        const payload = {
+            waypoints: routeWaypoints.map((wp) => ({
+                lat: wp.lat,
+                lon: wp.lon,
+                altitude_m: wp.alt
+            })),
+            metadata
+        };
+        if (selectedDroneId) {
+            payload.drone_id = selectedDroneId;
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `Compliance check failed: ${response.status}`);
         }
         return response.json();
     }
@@ -552,79 +607,12 @@
     }
 
     // ============================================================================
-    // Height Sampling (Ported from safe-corridor.js)
-    // ============================================================================
-
-
-    // ============================================================================
-    // FAA Validation (Ported from safe-corridor.js)
-    // ============================================================================
-
-    /**
-     * Validate flight path against FAA Part 107 regulations
-     * @param {Array} routeAnalysis - Results from analyzeRoute()
-     * @param {number} plannedAltitude - Planned flight altitude
-     * @returns {Object} Validation result
-     */
-    function validateFAA(routeAnalysis, plannedAltitude) {
-        const violations = [];
-        let isValid = true;
-
-        for (const point of routeAnalysis.points) {
-            const agl = plannedAltitude - point.terrainHeight;
-            const clearance = plannedAltitude - point.obstacleHeight;
-
-            // Check FAA 400ft limit
-            if (agl > CONFIG.FAA_MAX_ALTITUDE_AGL_M) {
-                violations.push({
-                    type: 'FAA_ALTITUDE_EXCEEDED',
-                    lat: point.lat,
-                    lon: point.lon,
-                    agl: agl,
-                    limit: CONFIG.FAA_MAX_ALTITUDE_AGL_M,
-                    message: `Altitude ${agl.toFixed(0)}m AGL exceeds FAA 400ft (${CONFIG.FAA_MAX_ALTITUDE_AGL_M}m) limit`
-                });
-                isValid = false;
-            }
-
-            // Check obstacle clearance
-            if (clearance < CONFIG.DEFAULT_SAFETY_BUFFER_M) {
-                violations.push({
-                    type: 'INSUFFICIENT_CLEARANCE',
-                    lat: point.lat,
-                    lon: point.lon,
-                    clearance: clearance,
-                    required: CONFIG.DEFAULT_SAFETY_BUFFER_M,
-                    message: `Only ${clearance.toFixed(0)}m clearance (need ${CONFIG.DEFAULT_SAFETY_BUFFER_M}m safety buffer)`
-                });
-                isValid = false;
-            }
-        }
-
-        const suggestedAltitude = routeAnalysis.maxObstacleHeight + CONFIG.DEFAULT_SAFETY_BUFFER_M;
-        const suggestedAGL = suggestedAltitude - Math.min(...routeAnalysis.points.map(p => p.terrainHeight));
-
-        return {
-            isValid,
-            violations,
-            suggestedAltitude,
-            suggestedAGL,
-            maxObstacleHeight: routeAnalysis.maxObstacleHeight,
-            faaCompliant: suggestedAGL <= CONFIG.FAA_MAX_ALTITUDE_AGL_M,
-            summary: isValid
-                ? `APPROVED: Route is legal at ${plannedAltitude.toFixed(0)}m`
-                : `DENIED: ${violations.length} violation(s) found`
-        };
-    }
-
-    // ============================================================================
     // Calculate Full Route (with Auto-Resolution)
     // ============================================================================
 
     /**
-     * Calculate and validate a complete flight route
-     * If straight path is blocked, auto-optimizes using terrain following
-     * @returns {Promise<Object>} Full route analysis with FAA validation
+     * Calculate a complete flight route using the server planner.
+     * @returns {Promise<Object>} Full route analysis response
      */
     async function calculateRoute() {
         if (waypoints.length < 2) {
@@ -845,6 +833,22 @@
         return result;
     }
 
+    function estimateBatteryMetrics(waypointsWithTime) {
+        const totalFlightTime = waypointsWithTime.length > 0
+            ? waypointsWithTime[waypointsWithTime.length - 1].time_offset
+            : 0;
+        const estimatedMinutes = totalFlightTime > 0 ? totalFlightTime / 60 : 0;
+        const reserveMin = Math.max(5, Math.ceil(estimatedMinutes * 0.2));
+        const capacityMin = Math.ceil(estimatedMinutes + reserveMin + 2);
+
+        return {
+            totalFlightTime,
+            estimatedMinutes,
+            reserveMin,
+            capacityMin
+        };
+    }
+
     /**
      * Generate a crypto-random UUID
      * @returns {string} UUID v4 format
@@ -932,8 +936,9 @@
      * @returns {Promise<Object>} Submission result
      */
     async function submitToATC(routeData) {
-        if (!routeData.validation.isValid) {
-            throw new Error('Cannot submit invalid flight plan');
+        const complianceOk = routeData?.complianceCheck?.ok;
+        if (complianceOk !== true) {
+            throw new Error('Compliance check incomplete or failed');
         }
 
         console.log('[Planner] ========================================');
@@ -953,10 +958,8 @@
         // Calculate time offsets for each waypoint
         const waypointsWithTime = calculateTimeOffsets(routeData.waypoints, droneSpeed);
 
-        // Calculate total flight time
-        const totalFlightTime = waypointsWithTime.length > 0
-            ? waypointsWithTime[waypointsWithTime.length - 1].time_offset
-            : 0;
+        const batteryMetrics = estimateBatteryMetrics(waypointsWithTime);
+        const totalFlightTime = batteryMetrics.totalFlightTime;
 
         // Calculate total distance
         let totalDistance = 0;
@@ -966,10 +969,9 @@
 
         // Generate high-fidelity 4D trajectory (1m spacing for conflict detection)
         const trajectoryLog = densifyRoute(routeData.waypoints, droneSpeed);
-
-        const estimatedMinutes = totalFlightTime > 0 ? totalFlightTime / 60 : 0;
-        const reserveMin = Math.max(5, Math.ceil(estimatedMinutes * 0.2));
-        const capacityMin = Math.ceil(estimatedMinutes + reserveMin + 2);
+        const reserveMin = batteryMetrics.reserveMin;
+        const capacityMin = batteryMetrics.capacityMin;
+        const clearanceM = resolveComplianceClearance();
 
         // Construct the payload matching backend schema
         const payload = {
@@ -983,12 +985,12 @@
                 trajectory_points: trajectoryLog.length,
                 planned_altitude_m: routeData.plannedAltitude,
                 max_obstacle_height_m: routeData.analysis.maxObstacleHeight,
-                faa_compliant: routeData.validation.faaCompliant,
+                faa_compliant: complianceOk,
                 submitted_at: new Date().toISOString(),
                 operation_type: 1,
                 battery_capacity_min: capacityMin,
                 battery_reserve_min: reserveMin,
-                clearance_m: 60,
+                clearance_m: clearanceM,
                 compliance_override_enabled: false
             }
         };
@@ -1085,9 +1087,6 @@
         // Route Calculation
         calculateRoute,
 
-        // FAA Validation
-        validateFAA,
-
         // ATC Submission
         submitToATC,
 
@@ -1101,6 +1100,9 @@
         checkGeofenceRoute,
         refreshGeofences,
         renderGeofences,
+
+        // Compliance
+        evaluateCompliance,
 
         // Utilities
         flyTo,

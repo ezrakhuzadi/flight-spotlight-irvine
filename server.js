@@ -17,13 +17,15 @@
   const FileStore = require("session-file-store")(session);
 
   const BLENDER_URL = process.env.BLENDER_URL || process.env.BLENDER_BASE_URL || "http://localhost:8000";
-  const ATC_URL = process.env.ATC_SERVER_URL || "http://host.docker.internal:3000";
+  const ATC_URL = process.env.ATC_SERVER_URL || "http://localhost:3000";
   const ATC_PROXY_BASE = process.env.ATC_PROXY_BASE || "/api/atc";
   const ATC_WS_URL = process.env.ATC_WS_URL || "";
   const ATC_WS_TOKEN = process.env.ATC_WS_TOKEN || "";
+  const ATC_ADMIN_TOKEN = process.env.ATC_ADMIN_TOKEN || "";
   const ATC_REGISTRATION_TOKEN = process.env.ATC_REGISTRATION_TOKEN || "";
   const BLENDER_AUDIENCE = process.env.PASSPORT_AUDIENCE || "testflight.flightblender.com";
   const BLENDER_AUTH_TOKEN = process.env.BLENDER_AUTH_TOKEN || "";
+  const IS_PRODUCTION = process.env.NODE_ENV === "production";
   const DEMO_MODE = process.env.DEMO_MODE === "1";
   const PASSWORD_ALGO = "bcrypt";
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
@@ -174,6 +176,10 @@
 
   function createDevJwt(scopes) {
     if (BLENDER_AUTH_TOKEN) return BLENDER_AUTH_TOKEN;
+    if (IS_PRODUCTION) {
+      console.error("[AUTH] BLENDER_AUTH_TOKEN missing; refusing to create a dummy token in production.");
+      return null;
+    }
     const header = { alg: "RS256", typ: "JWT" };
     const payload = {
       iss: "dummy",
@@ -186,6 +192,15 @@
       .replace(/\+/g, "-")
       .replace(/\//g, "_");
     return `${base64UrlEncode(header)}.${base64UrlEncode(payload)}.${signature}`;
+  }
+
+  function ensureBlenderToken(scopes, res) {
+    const token = createDevJwt(scopes);
+    if (!token) {
+      res.status(500).json({ message: "BLENDER_AUTH_TOKEN is required in production." });
+      return null;
+    }
+    return token;
   }
 
   function buildDemoRidPayload(center, subscriptionId) {
@@ -591,7 +606,8 @@
     }
 
     try {
-      const token = createDevJwt(["flightblender.read", "flightblender.write"]);
+      const token = ensureBlenderToken(["flightblender.read", "flightblender.write"], res);
+      if (!token) return;
       const response = await axios.put(
         `${BLENDER_URL}/rid/create_dss_subscription`,
         null,
@@ -611,7 +627,8 @@
 
   app.get("/api/rid/data/:subscriptionId", requireAuth, async (req, res) => {
     try {
-      const token = createDevJwt(["flightblender.read"]);
+      const token = ensureBlenderToken(["flightblender.read"], res);
+      if (!token) return;
       const response = await axios.get(
         `${BLENDER_URL}/rid/get_rid_data/${req.params.subscriptionId}`,
         {
@@ -633,7 +650,8 @@
     }
     try {
       const { testId, injectionId, payload } = buildDemoRidPayload(req.body?.center, req.body?.subscription_id);
-      const token = createDevJwt(["rid.inject_test_data"]);
+      const token = ensureBlenderToken(["rid.inject_test_data"], res);
+      if (!token) return;
       const response = await axios.put(
         `${BLENDER_URL}/rid/tests/${testId}`,
         payload,
@@ -657,12 +675,49 @@
   // ========================================
   // ATC-Drone proxy (same-origin for frontend)
   // ========================================
-  function requiresAuthorityForAtc(req) {
-    const method = req.method.toUpperCase();
+  const ATC_PROXY_ALLOWLIST = [
+    { methods: ["GET"], pattern: /^\/v1\/drones$/ },
+    { methods: ["GET"], pattern: /^\/v1\/drones\/[^/]+$/ },
+    { methods: ["POST"], pattern: /^\/v1\/drones\/register$/ },
+    { methods: ["GET"], pattern: /^\/v1\/traffic$/ },
+    { methods: ["GET"], pattern: /^\/v1\/conflicts$/ },
+    { methods: ["GET"], pattern: /^\/v1\/conformance$/ },
+    { methods: ["GET"], pattern: /^\/v1\/daa$/ },
+    { methods: ["GET"], pattern: /^\/v1\/compliance\/limits$/ },
+    { methods: ["POST"], pattern: /^\/v1\/compliance\/evaluate$/ },
+    { methods: ["POST"], pattern: /^\/v1\/routes\/plan$/ },
+    { methods: ["POST"], pattern: /^\/v1\/rid\/view$/ },
+    { methods: ["GET", "POST"], pattern: /^\/v1\/commands$/ },
+    { methods: ["GET"], pattern: /^\/v1\/geofences\/check$/ },
+    { methods: ["POST"], pattern: /^\/v1\/geofences\/check-route$/ },
+    { methods: ["GET", "POST"], pattern: /^\/v1\/geofences$/ },
+    { methods: ["GET", "PUT", "DELETE"], pattern: /^\/v1\/geofences\/[^/]+$/ },
+    { methods: ["POST"], pattern: /^\/v1\/flights\/plan$/ },
+    { methods: ["GET", "POST"], pattern: /^\/v1\/flights$/ }
+  ];
+
+  function isAllowedAtcProxy(method, requestPath) {
+    return ATC_PROXY_ALLOWLIST.some(rule => (
+      rule.methods.includes(method) && rule.pattern.test(requestPath)
+    ));
+  }
+
+  function resolveAtcProxyTimeoutMs(method, requestPath) {
+    const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "";
+    const path = typeof requestPath === "string" ? requestPath : "";
+    if (normalizedMethod === "POST") {
+      if (path === "/v1/routes/plan" || path === "/v1/compliance/evaluate") {
+        return 180_000;
+      }
+      if (path === "/v1/geofences/check-route" || path === "/v1/flights/plan") {
+        return 60_000;
+      }
+    }
+    return 10_000;
+  }
+
+  function requiresAuthorityForAtc(method, requestPath) {
     if (method === "GET") return false;
-    const requestPath = req.path.startsWith(ATC_PROXY_BASE)
-      ? req.path.slice(ATC_PROXY_BASE.length)
-      : req.path;
 
     if (requestPath.startsWith("/v1/geofences/check")) return false;
     if (requestPath.startsWith("/v1/geofences/check-route")) return false;
@@ -670,6 +725,19 @@
       return true;
     }
     if (requestPath.startsWith("/v1/admin")) return true;
+    return false;
+  }
+
+  function requiresAdminTokenForAtc(method, requestPath) {
+    if (requestPath === "/v1/commands" && ["GET", "POST"].includes(method)) {
+      return true;
+    }
+    if (requestPath === "/v1/flights/plan" && method === "POST") {
+      return true;
+    }
+    if (requestPath === "/v1/flights" && method === "POST") {
+      return true;
+    }
     return false;
   }
 
@@ -713,15 +781,18 @@
   }
 
   app.all(`${ATC_PROXY_BASE}/*`, requireAuth, async (req, res) => {
-    if (requiresAuthorityForAtc(req) && req.session.user?.role !== "authority") {
-      return res.status(403).json({ message: "insufficient_role" });
-    }
     const targetPath = req.originalUrl.replace(ATC_PROXY_BASE, "");
     const requestPath = req.path.startsWith(ATC_PROXY_BASE)
       ? req.path.slice(ATC_PROXY_BASE.length)
       : req.path;
     const url = `${ATC_URL}${targetPath}`;
     const method = req.method.toUpperCase();
+    if (!isAllowedAtcProxy(method, requestPath)) {
+      return res.status(404).json({ message: "not_found" });
+    }
+    if (requiresAuthorityForAtc(method, requestPath) && req.session.user?.role !== "authority") {
+      return res.status(403).json({ message: "insufficient_role" });
+    }
     if (!isAuthority(req)) {
       if (requestPath.startsWith("/v1/commands")) {
         if (method === "GET" && requestPath === "/v1/commands") {
@@ -764,22 +835,38 @@
       if (requestPath === "/v1/drones/register" && ATC_REGISTRATION_TOKEN) {
         headers["X-Registration-Token"] = ATC_REGISTRATION_TOKEN;
       }
+      if (ATC_ADMIN_TOKEN && requiresAdminTokenForAtc(method, requestPath)) {
+        headers.Authorization = `Bearer ${ATC_ADMIN_TOKEN}`;
+      }
 
+      const timeout = resolveAtcProxyTimeoutMs(method, requestPath);
       const response = await axios({
         method,
         url,
         data,
-        timeout: 10000,
+        timeout,
         validateStatus: () => true,
         headers
       });
 
-      if (typeof response.data === "object") {
+      const upstreamContentType = response.headers?.["content-type"];
+      if (upstreamContentType) {
+        res.set("Content-Type", upstreamContentType);
+      }
+
+      if (response.data !== null && typeof response.data === "object" && !Buffer.isBuffer(response.data)) {
         return res.status(response.status).json(response.data);
       }
       return res.status(response.status).send(response.data);
     } catch (error) {
-      console.error("[ATC Proxy] Request failed:", error.message);
+      const errMessage = error?.message || "unknown";
+      console.error("[ATC Proxy] Request failed:", errMessage);
+      const isTimeout =
+        error?.code === "ECONNABORTED" ||
+        errMessage.toLowerCase().includes("timeout");
+      if (isTimeout) {
+        return res.status(504).json({ message: "ATC request timed out" });
+      }
       return res.status(502).json({ message: "Failed to reach ATC server" });
     }
   });
@@ -790,7 +877,8 @@
 
   app.get("/api/blender/flight-declarations", requireAuth, async (req, res) => {
     try {
-      const token = createDevJwt(["flightblender.read"]);
+      const token = ensureBlenderToken(["flightblender.read"], res);
+      if (!token) return;
       const response = await axios.get(
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration`,
         {
@@ -827,7 +915,8 @@
 
   app.get("/api/blender/flight-declarations/:id", requireAuth, async (req, res) => {
     try {
-      const token = createDevJwt(["flightblender.read"]);
+      const token = ensureBlenderToken(["flightblender.read"], res);
+      if (!token) return;
       const response = await axios.get(
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${req.params.id}`,
         {
@@ -864,7 +953,8 @@
       }
     }
     try {
-      const token = createDevJwt(["flightblender.write"]);
+      const token = ensureBlenderToken(["flightblender.write"], res);
+      if (!token) return;
       const response = await axios.post(
         `${BLENDER_URL}/flight_declaration_ops/set_flight_declaration`,
         req.body,
@@ -892,7 +982,8 @@
 
     try {
       if (!isAuthority(req)) {
-        const token = createDevJwt(["flightblender.read"]);
+        const token = ensureBlenderToken(["flightblender.read"], res);
+        if (!token) return;
         const detail = await axios.get(
           `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}`,
           {
@@ -912,7 +1003,8 @@
         }
       }
 
-      const token = createDevJwt(["flightblender.write"]);
+      const token = ensureBlenderToken(["flightblender.write"], res);
+      if (!token) return;
       const response = await axios.delete(
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}/delete`,
         {

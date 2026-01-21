@@ -12,6 +12,8 @@
         getStatusClass: () => 'online',
         getStatusLabel: (status) => status || 'Unknown'
     };
+    const utils = window.ATCUtils;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     /**
      * Update dashboard with latest stats
@@ -64,19 +66,19 @@
 
         container.innerHTML = drones.slice(0, 5).map(drone => {
             const conformanceStatus = conformanceMap.get(drone.drone_id)?.status || 'unknown';
-            const conformanceClass = getConformanceClass(conformanceStatus);
+            const conformanceClass = utils.getConformanceClass(conformanceStatus);
             const statusLabel = statusUtils.getStatusLabel(drone.status);
             return `
                 <div class="list-item">
                     <span class="status-dot ${getStatusClass(drone.status)}"></span>
                     <div class="list-item-content">
-                        <div class="list-item-title">${drone.drone_id}</div>
+                        <div class="list-item-title">${escapeHtml(drone.drone_id)}</div>
                         <div class="list-item-subtitle">
-                            ${drone.lat.toFixed(5)}, ${drone.lon.toFixed(5)} @ ${drone.altitude_m.toFixed(0)}m
+                            ${escapeHtml(drone.lat.toFixed(5))}, ${escapeHtml(drone.lon.toFixed(5))} @ ${escapeHtml(drone.altitude_m.toFixed(0))}m
                         </div>
                     </div>
-                    <span class="status-badge ${getStatusClass(drone.status)}">${statusLabel}</span>
-                    <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
+                    <span class="status-badge ${getStatusClass(drone.status)}">${escapeHtml(statusLabel)}</span>
+                    <span class="status-badge ${conformanceClass}">${escapeHtml(conformanceStatus)}</span>
                 </div>
             `;
         }).join('');
@@ -124,9 +126,9 @@
         container.innerHTML = activities.map(a => `
             <div class="list-item" style="padding: 8px 12px;">
                 <div class="list-item-content">
-                    <div class="list-item-subtitle">${a.text}</div>
+                    <div class="list-item-subtitle">${escapeHtml(a.text)}</div>
                 </div>
-                <span class="text-muted" style="font-size: 11px;">${a.time}</span>
+                <span class="text-muted" style="font-size: 11px;">${escapeHtml(a.time)}</span>
             </div>
         `).join('');
     }
@@ -149,7 +151,7 @@
             alerts.push(`
                 <div class="list-item" style="background: rgba(239, 68, 68, 0.1); border-color: var(--accent-red);">
                     <div class="list-item-content">
-                        <div class="list-item-title text-danger">${stats.conflicts} Active Conflict(s)</div>
+                        <div class="list-item-title text-danger">${escapeHtml(stats.conflicts)} Active Conflict(s)</div>
                         <div class="list-item-subtitle">Automatic resolution in progress</div>
                     </div>
                     <a href="/control/map" class="btn btn-danger btn-sm">View Map</a>
@@ -161,7 +163,7 @@
             alerts.push(`
                 <div class="list-item" style="background: rgba(251, 191, 36, 0.1); border-color: var(--accent-yellow);">
                     <div class="list-item-content">
-                        <div class="list-item-title">${stats.conformanceNoncompliant} Nonconforming Flight(s)</div>
+                        <div class="list-item-title">${escapeHtml(stats.conformanceNoncompliant)} Nonconforming Flight(s)</div>
                         <div class="list-item-subtitle">Review conformance status</div>
                     </div>
                     <a href="/control/fleet" class="btn btn-warning btn-sm">View Fleet</a>
@@ -174,17 +176,6 @@
 
     function getStatusClass(status) {
         return statusUtils.getStatusClass(status);
-    }
-
-    function getConformanceClass(status) {
-        switch (status) {
-            case 'conforming':
-                return 'pass';
-            case 'nonconforming':
-                return 'fail';
-            default:
-                return 'warn';
-        }
     }
 
     // Initialize

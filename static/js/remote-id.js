@@ -25,6 +25,7 @@
         MAX_VIEW_DIAGONAL_KM: 10,
         STALE_ENTITY_MS: 15000
     };
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     // ========================================================================
     // State
@@ -264,7 +265,7 @@
 
     async function fetchRidTraffic() {
         const response = await fetch(
-            `${CONFIG.ATC_API_BASE}/v1/traffic?include_external=1&source=rid`,
+            `${CONFIG.ATC_API_BASE}/v1/traffic?include_external=true&source=rid`,
             {
                 credentials: 'same-origin'
             }
@@ -527,20 +528,19 @@
         container.innerHTML = aircraft.map(a => {
             const lastSeen = aircraftLastSeen.get(a.id);
             const lastSeenText = lastSeen ? formatRelativeTime(lastSeen) : 'Unknown';
-            const staleNote = isStale ? `<div class="rid-detail text-muted">Last seen: ${lastSeenText}</div>` : '';
+            const staleNote = isStale ? `<div class="rid-detail text-muted">Last seen: ${escapeHtml(lastSeenText)}</div>` : '';
             return `
             <div class="rid-aircraft ${selectedAircraftId === a.id ? 'selected' : ''}" 
-                 data-id="${a.id}"
-                 onclick="RemoteID.selectAircraft('${a.id}')">
+                 data-id="${escapeHtml(a.id)}">
                 <div class="rid-header">
-                    <span class="rid-id">${a.id}</span>
+                    <span class="rid-id">${escapeHtml(a.id)}</span>
                     <span class="rid-type">UAV</span>
                 </div>
                 <div class="rid-details">
-                    <div class="rid-detail">Lat: <span class="rid-detail-value">${formatNumber(a.lat, 5)}</span></div>
-                    <div class="rid-detail">Lon: <span class="rid-detail-value">${formatNumber(a.lon, 5)}</span></div>
-                    <div class="rid-detail">Alt: <span class="rid-detail-value">${formatNumber(a.altitude_m, 0)}m</span></div>
-                    <div class="rid-detail">Speed: <span class="rid-detail-value">${formatNumber(a.speed_mps, 1)}m/s</span></div>
+                    <div class="rid-detail">Lat: <span class="rid-detail-value">${escapeHtml(formatNumber(a.lat, 5))}</span></div>
+                    <div class="rid-detail">Lon: <span class="rid-detail-value">${escapeHtml(formatNumber(a.lon, 5))}</span></div>
+                    <div class="rid-detail">Alt: <span class="rid-detail-value">${escapeHtml(formatNumber(a.altitude_m, 0))}m</span></div>
+                    <div class="rid-detail">Speed: <span class="rid-detail-value">${escapeHtml(formatNumber(a.speed_mps, 1))}m/s</span></div>
                     ${staleNote}
                 </div>
                 <div style="margin-top: 8px;">
@@ -549,6 +549,15 @@
             </div>
         `;
         }).join('');
+
+        container.querySelectorAll('.rid-aircraft').forEach((entry) => {
+            entry.addEventListener('click', () => {
+                const id = entry.dataset.id;
+                if (id) {
+                    selectAircraft(id);
+                }
+            });
+        });
     }
 
     function updateMap(aircraft) {

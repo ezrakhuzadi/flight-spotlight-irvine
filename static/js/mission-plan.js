@@ -23,6 +23,8 @@
     const statusUtils = window.ATCStatus || {
         getStatusLabel: (status) => status || 'Unknown'
     };
+    const utils = window.ATCUtils;
+    const escapeHtml = window.escapeHtml || ((value) => String(value ?? ''));
 
     const state = {
         viewer: null,
@@ -574,8 +576,8 @@
 
         list.innerHTML = state.waypoints.map((wp, index) => `
             <div class="waypoint-item">
-                <span>#${index + 1} ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}</span>
-                <button class="btn btn-ghost btn-sm" data-index="${index}">Remove</button>
+                <span>#${escapeHtml(index + 1)} ${escapeHtml(wp.lat.toFixed(5))}, ${escapeHtml(wp.lon.toFixed(5))}</span>
+                <button class="btn btn-ghost btn-sm" data-index="${escapeHtml(index)}">Remove</button>
             </div>
         `).join('');
 
@@ -1077,26 +1079,11 @@
         for (let i = 1; i < waypoints.length; i += 1) {
             const prev = waypoints[i - 1];
             const next = waypoints[i];
-            distanceM += haversineDistanceMeters(prev, next);
+            distanceM += utils.haversineMeters(prev.lat, prev.lon, next.lat, next.lon);
         }
         const speed = cruiseSpeed > 0 ? cruiseSpeed : 0;
         const estimatedMinutes = speed > 0 ? distanceM / speed / 60 : 0;
         return { distanceM, estimatedMinutes, hasRoute: true };
-    }
-
-    function haversineDistanceMeters(a, b) {
-        const radLat1 = toRadians(a.lat);
-        const radLat2 = toRadians(b.lat);
-        const deltaLat = toRadians(b.lat - a.lat);
-        const deltaLon = toRadians(b.lon - a.lon);
-        const sinLat = Math.sin(deltaLat / 2);
-        const sinLon = Math.sin(deltaLon / 2);
-        const h = sinLat * sinLat + Math.cos(radLat1) * Math.cos(radLat2) * sinLon * sinLon;
-        return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
-    }
-
-    function toRadians(value) {
-        return (value * Math.PI) / 180;
     }
 
     function formatDistance(distanceM) {
@@ -1173,7 +1160,7 @@
         const colorClass = type === 'error' ? 'status-badge danger' : 'status-badge online';
         container.innerHTML = `
             <div class="${colorClass}" style="margin-bottom: 16px;">
-                <span>${message}</span>
+                <span>${escapeHtml(message)}</span>
             </div>
         `;
     }
@@ -1248,11 +1235,8 @@
             showMessage('error', 'Compliance data unavailable. Run analysis and try again.');
             return;
         }
+
         const flightId = generateFlightId();
-        const compliancePayload = {
-            ...(complianceSnapshot || {}),
-            atc_plan_id: flightId
-        };
         const blockingChecks = getBlockingChecks(complianceSnapshot);
         const overrideEnabled = complianceSnapshot.override?.enabled;
         const overrideNotes = complianceSnapshot.override?.notes || '';
@@ -1268,6 +1252,44 @@
         }
 
         const activeRoute = getActiveRoute();
+        const atcWaypoints = activeRoute.map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
+        }));
+
+        const trajectorySource = Array.isArray(state.optimizedRoute) && state.optimizedRoute.length >= 2
+            ? state.optimizedRoute
+            : activeRoute;
+        const trajectoryLog = trajectorySource.map((wp) => ({
+            lat: wp.lat,
+            lon: wp.lon,
+            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
+        }));
+
+        const atcPlanEmbed = {
+            id: flightId,
+            drone_id: droneId,
+            waypoints: atcWaypoints,
+            trajectory_log: trajectoryLog,
+            metadata: {
+                drone_speed_mps: cruiseSpeed > 0 ? cruiseSpeed : undefined,
+                battery_capacity_min: Number.isFinite(batteryCapacity) && batteryCapacity > 0 ? batteryCapacity : undefined,
+                battery_reserve_min: Number.isFinite(batteryReserve) ? batteryReserve : undefined,
+                clearance_m: Number.isFinite(clearanceM) ? clearanceM : undefined,
+                operation_type: operationType,
+                compliance_override_enabled: overrideEnabled,
+                compliance_override_notes: overrideNotes || undefined,
+                submitted_at: new Date().toISOString()
+            }
+        };
+
+        const compliancePayload = {
+            ...(complianceSnapshot || {}),
+            atc_plan_id: flightId,
+            atc_plan: atcPlanEmbed
+        };
+
         const routeAltitudes = activeRoute
             .map((wp) => Number(wp.alt))
             .filter((alt) => Number.isFinite(alt));
@@ -1299,21 +1321,6 @@
             showMessage('error', `Flight Blender submission failed: ${error.message}`);
             return;
         }
-
-        const atcWaypoints = activeRoute.map((wp) => ({
-            lat: wp.lat,
-            lon: wp.lon,
-            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
-        }));
-
-        const trajectorySource = Array.isArray(state.optimizedRoute) && state.optimizedRoute.length >= 2
-            ? state.optimizedRoute
-            : activeRoute;
-        const trajectoryLog = trajectorySource.map((wp) => ({
-            lat: wp.lat,
-            lon: wp.lon,
-            alt: Number.isFinite(wp.alt) ? wp.alt : cruiseAltitude
-        }));
 
         const metadata = {
             drone_id: droneId,

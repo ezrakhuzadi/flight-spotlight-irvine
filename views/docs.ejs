@@ -261,75 +261,103 @@
                 <a href="#overview" class="docs-nav-link active">Overview</a>
                 <a href="#quickstart" class="docs-nav-link">Quick Start</a>
                 <a href="#installation" class="docs-nav-link">Installation</a>
+                <a href="#auth" class="docs-nav-link">Authentication</a>
             </div>
 
             <div class="docs-nav-section">
                 <div class="docs-nav-title">SDK Reference</div>
                 <a href="#client" class="docs-nav-link">AtcClient</a>
-                <a href="#registration" class="docs-nav-link">Registration</a>
-                <a href="#telemetry" class="docs-nav-link">Telemetry</a>
-                <a href="#commands" class="docs-nav-link">Commands</a>
+                <a href="#sdk-registration" class="docs-nav-link">Registration</a>
+                <a href="#sdk-telemetry" class="docs-nav-link">Telemetry</a>
+                <a href="#sdk-flight-plans" class="docs-nav-link">Flight Plans</a>
+                <a href="#sdk-commands" class="docs-nav-link">Commands</a>
+                <a href="#sdk-command-stream" class="docs-nav-link">Command Stream</a>
+                <a href="#sdk-utilities" class="docs-nav-link">Utilities</a>
             </div>
 
             <div class="docs-nav-section">
                 <div class="docs-nav-title">API Reference</div>
+                <a href="#api-health" class="docs-nav-link">Health</a>
                 <a href="#api-drones" class="docs-nav-link">Drones</a>
+                <a href="#api-traffic" class="docs-nav-link">Traffic</a>
                 <a href="#api-telemetry" class="docs-nav-link">Telemetry</a>
                 <a href="#api-commands" class="docs-nav-link">Commands</a>
+                <a href="#api-geofences" class="docs-nav-link">Geofences</a>
                 <a href="#api-conflicts" class="docs-nav-link">Conflicts</a>
+                <a href="#api-conformance" class="docs-nav-link">Conformance</a>
+                <a href="#api-daa" class="docs-nav-link">DAA</a>
+                <a href="#api-compliance" class="docs-nav-link">Compliance</a>
+                <a href="#api-routes" class="docs-nav-link">Routes</a>
+                <a href="#api-flights" class="docs-nav-link">Flights</a>
+                <a href="#api-rid" class="docs-nav-link">RID</a>
+                <a href="#api-websockets" class="docs-nav-link">WebSockets</a>
+                <a href="#api-admin" class="docs-nav-link">Admin</a>
             </div>
 
             <div class="docs-nav-section">
                 <div class="docs-nav-title">Examples</div>
                 <a href="#example-basic" class="docs-nav-link">Basic Drone</a>
-                <a href="#example-mission" class="docs-nav-link">Mission Flight</a>
+                <a href="#example-command-stream" class="docs-nav-link">Command Stream</a>
+                <a href="#example-flight-plan" class="docs-nav-link">Flight Plan</a>
             </div>
         </nav>
 
         <main class="docs-content">
-            <h1 id="overview">ATC-Drone SDK</h1>
-            <p>Connect your drone to the Control Center for real-time tracking, conflict detection, and automated
-                traffic management.</p>
+            <h1 id="overview">ATC-Drone SDK & API</h1>
+            <p>Integrate drones with the ATC server for registration, telemetry, conflict detection, routing, and
+                command delivery. The SDK is for drone clients; the API reference below is complete for Control Center
+                and service integrations.</p>
 
             <div class="callout info">
-                <strong>ATC Server URL:</strong> <code class="code-inline">http://localhost:3000</code><br>
-                Make sure the ATC server is running before connecting your drone.
+                <strong>Base URLs:</strong><br>
+                <code class="code-inline">http://localhost:3000</code> for direct drone or service calls.<br>
+                <code class="code-inline">/api/atc</code> for Control Center same-origin proxy (browser clients).<br>
+                <code class="code-inline">ws://localhost:3000/v1/ws</code> for realtime telemetry streaming (use
+                <code class="code-inline">wss://</code> for TLS).
+            </div>
+
+            <div class="callout warning">
+                <strong>Tokens:</strong> Registration tokens are required by default for
+                <code class="code-inline">/v1/drones/register</code>. Session tokens from registration are required for
+                telemetry and command polling.
             </div>
 
             <h2 id="quickstart">Quick Start</h2>
-            <p>Get your drone connected in 5 minutes:</p>
+            <p>Register a drone and stream telemetry in a few minutes.</p>
 
             <h3>1. Add the SDK to your project</h3>
             <div class="code-block">
-                <pre># Add to your Cargo.toml
+                <pre># Cargo.toml
 [dependencies]
 atc-sdk = { path = "../atc-drone/crates/atc-sdk" }
-tokio = { version = "1.0", features = ["full"] }</pre>
+atc-core = { path = "../atc-drone/crates/atc-core" }
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"</pre>
             </div>
 
-            <h3>2. Connect and send telemetry</h3>
+            <h3>2. Register and send telemetry</h3>
             <div class="code-block">
                 <pre>use atc_sdk::AtcClient;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Connect to ATC server
-    let client = AtcClient::new("http://localhost:3000");
-    
-    // Register your drone
-    client.register(None).await?;
-    println!("Drone registered: {}", client.drone_id().unwrap());
-    
-    // Send position updates
+    let mut client = AtcClient::new("http://localhost:3000");
+
+    // Optional if registration token enforcement is enabled.
+    client.set_registration_token(Some("shared-token".to_string()));
+
+    let register = client.register_with_owner(None, Some("owner-123")).await?;
+    println!("Registered drone {}", register.drone_id);
+
     loop {
-        client.send_position(
-            33.6846,    // latitude
-            -117.8265,  // longitude
-            50.0,       // altitude (meters)
-            90.0,       // heading (degrees)
-            10.0        // speed (m/s)
-        ).await?;
-        
+        client.send_position(33.6846, -117.8265, 50.0, 90.0, 10.0).await?;
+
+        if let Some(cmd) = client.get_next_command().await? {
+            println!("Command: {:?}", cmd.command_type);
+            client.ack_command(&cmd.command_id).await?;
+        }
+
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }</pre>
@@ -339,113 +367,179 @@ async fn main() -> anyhow::Result<()> {
 
             <h3>Prerequisites</h3>
             <ul>
-                <li>Rust 1.70+ (for SDK)</li>
-                <li>ATC Server running on localhost:3000</li>
-                <li>Network access between drone and server</li>
+                <li>Rust 1.70+ (SDK and server)</li>
+                <li>ATC server running on the target host/port</li>
+                <li>Network access between drones and server</li>
             </ul>
 
-            <h3>Clone the Repository</h3>
+            <h3>Clone and run the server</h3>
             <div class="code-block">
                 <pre>git clone https://github.com/your-org/atc-drone.git
 cd atc-drone
-cargo build --release</pre>
+cargo run -p atc-server --release</pre>
             </div>
 
-            <h3>Run the ATC Server</h3>
-            <div class="code-block">
-                <pre>cargo run -p atc-server --release</pre>
-            </div>
+            <h2 id="auth">Authentication</h2>
+            <p>ATC uses short-lived tokens for drones and optional shared tokens for registration and WebSockets.</p>
+            <ul>
+                <li><strong>Registration token</strong> (<code class="code-inline">X-Registration-Token</code>) is
+                    required by default for <code class="code-inline">/v1/drones/register</code>. Configure
+                    <code class="code-inline">ATC_REGISTRATION_TOKEN</code> and
+                    <code class="code-inline">ATC_REQUIRE_REGISTRATION_TOKEN</code>.</li>
+                <li><strong>Session token</strong> is returned by registration and must be sent as
+                    <code class="code-inline">Authorization: Bearer &lt;session_token&gt;</code> for
+                    <code class="code-inline">/v1/telemetry</code>, <code class="code-inline">/v1/commands/next</code>,
+                    <code class="code-inline">/v1/commands/ack</code>, and
+                    <code class="code-inline">/v1/commands/ws</code>.</li>
+                <li><strong>WebSocket token</strong> (optional) can be required for realtime streaming via
+                    <code class="code-inline">/v1/ws</code>. Configure <code class="code-inline">ATC_WS_TOKEN</code> and
+                    <code class="code-inline">ATC_REQUIRE_WS_TOKEN</code>.</li>
+            </ul>
 
             <h2 id="client">AtcClient</h2>
             <p>The main client for communicating with the ATC server.</p>
 
-            <h3>Creating a Client</h3>
+            <h3>Creating a client</h3>
             <div class="code-block">
                 <pre>use atc_sdk::AtcClient;
 
-// Create client with default server URL
-let client = AtcClient::new("http://localhost:3000");
-
-// With custom timeout
-let client = AtcClient::with_timeout("http://localhost:3000", Duration::from_secs(5));</pre>
+let mut client = AtcClient::new("http://localhost:3000");</pre>
             </div>
 
-            <h2 id="registration">Registration</h2>
-            <p>Before sending telemetry, drones must register with the ATC server.</p>
-            <div class="callout warning">
-                <strong>Registration Token:</strong> Set <code class="code-inline">ATC_REGISTRATION_TOKEN</code>
-                on the ATC server and pass it as <code class="code-inline">X-Registration-Token</code>.
-            </div>
-
+            <h2 id="sdk-registration">Registration</h2>
+            <p>Register before sending telemetry or polling commands.</p>
             <div class="code-block">
-                <pre>// Set registration token before first register call
-client.set_registration_token(Some("your-shared-token".to_string()));
+                <pre>// Optional if the server enforces registration tokens.
+client.set_registration_token(Some("shared-token".to_string()));
 
 // Register with auto-generated ID
-let drone_id = client.register(None).await?;
+let register = client.register(None).await?;
 
 // Register with custom ID
-let drone_id = client.register(Some("my-drone-001")).await?;
+let register = client.register(Some("my-drone-001")).await?;
 
-// Register with owner (for user-specific tracking)
-client.register_with_owner(Some("my-drone"), Some("username")).await?;</pre>
+// Register with owner (for per-user filtering)
+let register = client.register_with_owner(Some("my-drone"), Some("owner-123")).await?;</pre>
             </div>
 
-            <h2 id="telemetry">Telemetry</h2>
+            <h2 id="sdk-telemetry">Telemetry</h2>
             <p>Send position updates to the ATC server for tracking and conflict detection.</p>
-
             <div class="code-block">
-                <pre>// Basic position update
+                <pre>// Basic position update (timestamp handled for you)
 client.send_position(lat, lon, altitude_m, heading_deg, speed_mps).await?;
 
-// With owner tracking (for user-specific drone visibility)
+// With owner tracking
 client.send_position_with_owner(
     lat, lon, altitude_m, heading_deg, speed_mps,
-    Some("username".to_string())
+    Some("owner-123".to_string())
 ).await?;</pre>
+            </div>
+            <div class="code-block">
+                <pre>// Custom telemetry payload
+use atc_core::models::Telemetry;
+use chrono::Utc;
+
+let telemetry = Telemetry {
+    drone_id: "DRONE0001".to_string(),
+    owner_id: Some("owner-123".to_string()),
+    lat: 33.6846,
+    lon: -117.8265,
+    altitude_m: 50.0,
+    velocity_x: 10.0,
+    velocity_y: 0.0,
+    velocity_z: 0.0,
+    heading_deg: 90.0,
+    speed_mps: 10.0,
+    timestamp: Utc::now(),
+};
+
+client.send_telemetry(&telemetry).await?;</pre>
             </div>
 
             <div class="callout warning">
                 <strong>Update Frequency:</strong> Send telemetry at least once per second for accurate conflict
-                detection.
-                Drones that don't send updates for 10 seconds are marked as "Lost".
+                detection. Stale drones are marked as <code class="code-inline">lost</code>.
             </div>
 
-            <h2 id="commands">Commands</h2>
-            <p>Drones can poll for and respond to commands from the Control Center.</p>
-
+            <h2 id="sdk-flight-plans">Flight Plans</h2>
+            <p>Create a flight plan for conflict detection and compliance checks.</p>
             <div class="code-block">
-                <pre>// Poll for pending commands
-let commands = client.get_commands().await?;
+                <pre>use atc_core::models::{FlightPlanRequest, Waypoint};
 
-for cmd in commands {
-    match cmd.command_type.as_str() {
-        "HOLD" => {
-            // Hover in place for cmd.duration_s seconds
-            println!("HOLD command received");
+let request = FlightPlanRequest {
+    drone_id: "DRONE0001".to_string(),
+    owner_id: Some("owner-123".to_string()),
+    waypoints: Some(vec![
+        Waypoint { lat: 33.6846, lon: -117.8265, altitude_m: 50.0, speed_mps: Some(10.0) },
+        Waypoint { lat: 33.6860, lon: -117.8250, altitude_m: 55.0, speed_mps: Some(10.0) },
+    ]),
+    trajectory_log: None,
+    metadata: None,
+    origin: None,
+    destination: None,
+    departure_time: None,
+};
+
+let plan = client.create_flight_plan(&request).await?;</pre>
+            </div>
+            <p>If the client is registered, <code class="code-inline">create_flight_plan</code> overwrites the
+                request's <code class="code-inline">drone_id</code> with the registered ID.</p>
+
+            <h2 id="sdk-commands">Commands</h2>
+            <p>Poll and acknowledge commands from the Control Center.</p>
+            <div class="code-block">
+                <pre>use atc_core::models::CommandType;
+
+if let Some(cmd) = client.get_next_command().await? {
+    match cmd.command_type {
+        CommandType::Hold { duration_secs } => {
+            println!("Hold for {} seconds", duration_secs);
         }
-        "RESUME" => {
-            // Continue normal operation
-            println!("RESUME command received");
+        CommandType::Resume => {
+            println!("Resume mission");
         }
-        "LAND" => {
-            // Emergency landing
-            println!("LAND command received");
+        CommandType::AltitudeChange { target_altitude_m } => {
+            println!("Change altitude to {}m", target_altitude_m);
         }
-        "ALTITUDE" => {
-            // Change altitude to cmd.target_altitude_m
-            println!("Change altitude to {}m", cmd.target_altitude_m);
+        CommandType::Reroute { waypoints, .. } => {
+            println!("Reroute with {} waypoints", waypoints.len());
         }
-        _ => {}
     }
-    
-    // Acknowledge command
-    client.ack_command(&cmd.id).await?;
+    client.ack_command(&cmd.command_id).await?;
 }</pre>
             </div>
 
-            <h2 id="api-drones">API: Drones</h2>
+            <h2 id="sdk-command-stream">Command Stream</h2>
+            <p>Use WebSockets for lower-latency command delivery.</p>
+            <div class="code-block">
+                <pre>let mut stream = client.connect_command_stream().await?;
 
+while let Some(cmd) = stream.next_command().await? {
+    println!("Streaming command {}", cmd.command_id);
+}</pre>
+            </div>
+
+            <h2 id="sdk-utilities">Utilities</h2>
+            <ul>
+                <li><code class="code-inline">drone_id()</code> - Returns the registered drone ID.</li>
+                <li><code class="code-inline">owner_id()</code> - Returns the assigned owner ID (if any).</li>
+                <li><code class="code-inline">session_token()</code> - Returns the session token from registration.</li>
+                <li><code class="code-inline">set_owner_id()</code> - Updates the owner ID for telemetry.</li>
+                <li><code class="code-inline">set_registration_token()</code> - Sets the registration token header.</li>
+            </ul>
+
+            <h2 id="api-health">API: Health</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/health</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Basic health check for the ATC server.</p>
+                </div>
+            </div>
+
+            <h2 id="api-drones">API: Drones</h2>
             <div class="api-endpoint">
                 <div class="api-endpoint-header">
                     <span class="api-method get">GET</span>
@@ -455,8 +549,18 @@ for cmd in commands {
                     <p>List all registered drones.</p>
                     <strong>Query Parameters:</strong>
                     <ul>
-                        <li><code class="code-inline">owner_id</code> - Filter by owner username</li>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
                     </ul>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/drones/{drone_id}</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Get a single registered drone.</p>
                 </div>
             </div>
 
@@ -469,20 +573,66 @@ for cmd in commands {
                     <p>Register a new drone.</p>
                     <strong>Headers:</strong>
                     <ul>
-                        <li><code class="code-inline">X-Registration-Token</code> - Required when registration token enforcement is enabled.</li>
+                        <li><code class="code-inline">X-Registration-Token</code> - Required when registration token
+                            enforcement is enabled.</li>
                     </ul>
                     <strong>Request Body:</strong>
                     <div class="code-block">
                         <pre>{
   "drone_id": "optional-custom-id",
-  "owner_id": "username"
+  "owner_id": "owner-123",
+  "drone_type": "UAV"
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "DRONE0001",
+  "session_token": "0f2c5c1e-1d94-4c1d-acde-2b8b3ce7c1b4"
 }</pre>
                     </div>
                 </div>
             </div>
 
-            <h2 id="api-telemetry">API: Telemetry</h2>
+            <h2 id="api-traffic">API: Traffic</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/traffic</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List local traffic and optional external RID/DSS tracks.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                        <li><code class="code-inline">include_external</code> - Include external traffic (true/false).</li>
+                        <li><code class="code-inline">source</code> - Filter by source (local, rid, external).</li>
+                        <li><code class="code-inline">external_only</code> - Return only external traffic.</li>
+                    </ul>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>[
+  {
+    "drone_id": "DRONE0001",
+    "owner_id": "owner-123",
+    "lat": 33.6846,
+    "lon": -117.8265,
+    "altitude_m": 50.0,
+    "heading_deg": 90.0,
+    "speed_mps": 10.0,
+    "last_update": "2025-01-01T00:00:00Z",
+    "status": "active",
+    "traffic_source": "local"
+  }
+]</pre>
+                    </div>
+                    <p>Status values: <code class="code-inline">active</code>, <code class="code-inline">holding</code>,
+                        <code class="code-inline">lost</code>, <code class="code-inline">inactive</code>. Traffic source is
+                        <code class="code-inline">local</code> or <code class="code-inline">rid</code>.</p>
+                </div>
+            </div>
 
+            <h2 id="api-telemetry">API: Telemetry</h2>
             <div class="api-endpoint">
                 <div class="api-endpoint-header">
                     <span class="api-method post">POST</span>
@@ -490,10 +640,15 @@ for cmd in commands {
                 </div>
                 <div class="api-endpoint-body">
                     <p>Send drone telemetry update.</p>
+                    <strong>Headers:</strong>
+                    <ul>
+                        <li><code class="code-inline">Authorization: Bearer &lt;session_token&gt;</code></li>
+                    </ul>
+                    <strong>Request Body:</strong>
                     <div class="code-block">
                         <pre>{
-  "drone_id": "my-drone-001",
-  "owner_id": "username",
+  "drone_id": "DRONE0001",
+  "owner_id": "owner-123",
   "lat": 33.6846,
   "lon": -117.8265,
   "altitude_m": 50.0,
@@ -501,42 +656,258 @@ for cmd in commands {
   "speed_mps": 10.0,
   "velocity_x": 10.0,
   "velocity_y": 0.0,
-  "velocity_z": 0.0
+  "velocity_z": 0.0,
+  "timestamp": "2025-01-01T00:00:00Z"
 }</pre>
                     </div>
                 </div>
             </div>
 
             <h2 id="api-commands">API: Commands</h2>
-
             <div class="api-endpoint">
                 <div class="api-endpoint-header">
                     <span class="api-method get">GET</span>
-                    <span class="api-path">/v1/drones/{drone_id}/commands</span>
+                    <span class="api-path">/v1/commands</span>
                 </div>
                 <div class="api-endpoint-body">
-                    <p>Get pending commands for a drone.</p>
+                    <p>List all pending commands (UI/admin use).</p>
                 </div>
             </div>
 
             <div class="api-endpoint">
                 <div class="api-endpoint-header">
                     <span class="api-method post">POST</span>
-                    <span class="api-path">/v1/drones/{drone_id}/command</span>
+                    <span class="api-path">/v1/commands</span>
                 </div>
                 <div class="api-endpoint-body">
-                    <p>Send a command to a drone.</p>
+                    <p>Issue a command to a drone.</p>
+                    <strong>Request Body (Hold example):</strong>
                     <div class="code-block">
                         <pre>{
-  "command_type": "HOLD",
-  "duration_s": 30
+  "drone_id": "DRONE0001",
+  "owner_id": "owner-123",
+  "type": "HOLD",
+  "duration_secs": 30,
+  "expires_in_secs": 60
+}</pre>
+                    </div>
+                    <strong>Other command payloads:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "DRONE0001",
+  "type": "ALTITUDE_CHANGE",
+  "target_altitude_m": 120.0
+}
+
+{
+  "drone_id": "DRONE0001",
+  "type": "REROUTE",
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 55.0 },
+    { "lat": 33.6855, "lon": -117.8252, "altitude_m": 55.0 }
+  ],
+  "reason": "Conflict avoidance"
+}
+
+{
+  "drone_id": "DRONE0001",
+  "type": "RESUME"
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "command_id": "CMD-ABC12345",
+  "drone_id": "DRONE0001",
+  "status": "queued"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/commands/next?drone_id={drone_id}</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Poll the next pending command for a drone.</p>
+                    <strong>Headers:</strong>
+                    <ul>
+                        <li><code class="code-inline">Authorization: Bearer &lt;session_token&gt;</code></li>
+                    </ul>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "command_id": "CMD-ABC12345",
+  "drone_id": "DRONE0001",
+  "command_type": {
+    "type": "HOLD",
+    "duration_secs": 30
+  },
+  "issued_at": "2025-01-01T00:00:00Z",
+  "expires_at": "2025-01-01T00:01:00Z",
+  "acknowledged": false
+}</pre>
+                    </div>
+                    <p>Returns <code class="code-inline">null</code> when no command is pending.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/commands/ack</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Acknowledge a command.</p>
+                    <strong>Headers:</strong>
+                    <ul>
+                        <li><code class="code-inline">Authorization: Bearer &lt;session_token&gt;</code></li>
+                    </ul>
+                    <div class="code-block">
+                        <pre>{
+  "command_id": "CMD-ABC12345"
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "status": "acknowledged",
+  "command_id": "CMD-ABC12345"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-geofences">API: Geofences</h2>
+            <div class="callout info">
+                <strong>geofence_type values:</strong> <code class="code-inline">no_fly_zone</code>,
+                <code class="code-inline">restricted_area</code>,
+                <code class="code-inline">temporary_restriction</code>,
+                <code class="code-inline">advisory</code>. Polygons must be closed (first point equals last).
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/geofences</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List all geofences.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/geofences</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Create a geofence.</p>
+                    <div class="code-block">
+                        <pre>{
+  "name": "Airport NFZ",
+  "geofence_type": "no_fly_zone",
+  "polygon": [
+    [33.6846, -117.8265],
+    [33.6855, -117.8265],
+    [33.6855, -117.8255],
+    [33.6846, -117.8255],
+    [33.6846, -117.8265]
+  ],
+  "lower_altitude_m": 0.0,
+  "upper_altitude_m": 120.0
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/geofences/{id}</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Fetch a geofence by ID.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method put">PUT</span>
+                    <span class="api-path">/v1/geofences/{id}</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Update a geofence. All fields are optional.</p>
+                    <div class="code-block">
+                        <pre>{
+  "name": "Updated name",
+  "active": true,
+  "upper_altitude_m": 150.0
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method delete">DELETE</span>
+                    <span class="api-path">/v1/geofences/{id}</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Delete a geofence.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/geofences/check?lat=...&lon=...&altitude_m=...</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Check a point against active geofences.</p>
+                    <div class="code-block">
+                        <pre>{
+  "inside_geofence": true,
+  "geofence_ids": ["abc-123"]
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/geofences/check-route</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Check a route against active geofences.</p>
+                    <div class="code-block">
+                        <pre>{
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0 },
+    { "lat": 33.6860, "lon": -117.8250, "altitude_m": 55.0 }
+  ]
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "conflicts": true,
+  "conflicting_geofences": [
+    {
+      "geofence_id": "abc-123",
+      "geofence_name": "Airport NFZ",
+      "segment_index": 0
+    }
+  ]
 }</pre>
                     </div>
                 </div>
             </div>
 
             <h2 id="api-conflicts">API: Conflicts</h2>
-
             <div class="api-endpoint">
                 <div class="api-endpoint-header">
                     <span class="api-method get">GET</span>
@@ -544,99 +915,526 @@ for cmd in commands {
                 </div>
                 <div class="api-endpoint-body">
                     <p>Get active airspace conflicts.</p>
-                    <strong>Response:</strong>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                    </ul>
                     <div class="code-block">
                         <pre>[
   {
-    "id": "conflict-uuid",
     "drone1_id": "drone-alpha",
     "drone2_id": "drone-beta",
     "distance_m": 45.2,
     "severity": "warning",
-    "time_to_closest": 5.3
+    "time_to_closest": 5.3,
+    "closest_distance_m": 30.1,
+    "cpa_lat": 33.6849,
+    "cpa_lon": -117.8268,
+    "cpa_altitude_m": 55.0,
+    "timestamp": 1735689600.0
   }
 ]</pre>
+                    </div>
+                    <p>Severity values: <code class="code-inline">info</code>, <code class="code-inline">warning</code>,
+                        <code class="code-inline">critical</code>.</p>
+                </div>
+            </div>
+
+            <h2 id="api-conformance">API: Conformance</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/conformance</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List conformance statuses for active drones.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                    </ul>
+                    <div class="code-block">
+                        <pre>[
+  {
+    "drone_id": "DRONE0001",
+    "owner_id": "owner-123",
+    "status": "conforming",
+    "last_checked": "2025-01-01T00:00:00Z",
+    "record": {
+      "id": "rec-001",
+      "flight_declaration_id": "decl-123",
+      "aircraft_id": "DRONE0001",
+      "conformance_state": 1,
+      "conformance_state_label": "Conforming",
+      "conformance_state_code": "CONFORMING",
+      "timestamp": "2025-01-01T00:00:00Z",
+      "description": "No issues",
+      "event_type": "status",
+      "geofence_breach": false,
+      "geofence_id": null,
+      "resolved": true,
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    }
+  }
+]</pre>
+                    </div>
+                    <p>Typical status values: <code class="code-inline">conforming</code> and
+                        <code class="code-inline">nonconforming</code>.</p>
+                </div>
+            </div>
+
+            <h2 id="api-daa">API: DAA</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/daa</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List Detect-and-Avoid advisories.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                        <li><code class="code-inline">active_only</code> - Return unresolved advisories only.</li>
+                    </ul>
+                    <div class="code-block">
+                        <pre>[
+  {
+    "advisory_id": "daa-001",
+    "drone_id": "DRONE0001",
+    "owner_id": "owner-123",
+    "source": "conflict",
+    "severity": "warning",
+    "action": "reroute",
+    "description": "Conflict with DRONE0002",
+    "related_id": "conflict-DRONE0001-DRONE0002",
+    "record": null,
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-01-01T00:00:00Z",
+    "resolved": false
+  }
+]</pre>
+                    </div>
+                    <p>Severity values: <code class="code-inline">advisory</code>,
+                        <code class="code-inline">warning</code>, <code class="code-inline">critical</code>.</p>
+                </div>
+            </div>
+
+            <h2 id="api-compliance">API: Compliance</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/compliance/limits</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Fetch compliance thresholds for UI forms.</p>
+                    <div class="code-block">
+                        <pre>{
+  "maxWindMps": 12.0,
+  "maxGustMps": 15.0,
+  "maxPrecipMm": 2.0,
+  "windWarnRatio": 0.8,
+  "batteryWarnMarginMin": 5.0,
+  "populationBvlosMax": 1200.0,
+  "populationWarn": 900.0,
+  "populationAbsoluteMax": 1500.0,
+  "defaultClearanceM": 60.0
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/compliance/evaluate</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Evaluate route compliance (weather, obstacles, population, battery).</p>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "DRONE0001",
+  "owner_id": "owner-123",
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0 },
+    { "lat": 33.6860, "lon": -117.8250, "altitude_m": 55.0 }
+  ],
+  "metadata": {
+    "drone_speed_mps": 10.0,
+    "battery_capacity_min": 30.0,
+    "battery_reserve_min": 5.0,
+    "clearance_m": 60.0,
+    "operation_type": 1,
+    "compliance_override_enabled": false
+  }
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "ok": true,
+  "blocking": [],
+  "violations": [],
+  "report": {
+    "generated_at": "2025-01-01T00:00:00Z",
+    "overall_status": "pass",
+    "route": { "distance_m": 1200.0, "estimated_minutes": 2.0, "has_route": true },
+    "checks": {
+      "weather": {
+        "status": "pass",
+        "message": "OK",
+        "wind_mps": 3.2,
+        "gust_mps": 4.1,
+        "precip_mm": 0.0,
+        "max_wind_mps": 12.0,
+        "max_gust_mps": 15.0,
+        "max_precip_mm": 2.0,
+        "source": "open-meteo"
+      },
+      "battery": {
+        "status": "pass",
+        "message": "OK",
+        "estimated_minutes": 12.0,
+        "capacity_min": 30.0,
+        "reserve_min": 5.0,
+        "remaining_min": 18.0,
+        "cruise_speed_mps": 10.0
+      },
+      "population": {
+        "status": "pass",
+        "message": "OK",
+        "density": 200.0,
+        "classification": "rural",
+        "building_count": 12,
+        "estimated_population": 40.0,
+        "area_km2": 0.8,
+        "source": "overpass"
+      },
+      "obstacles": {
+        "status": "pass",
+        "message": "OK",
+        "clearance_m": 60.0,
+        "conflicts": [],
+        "hazards": [],
+        "obstacle_count": 0,
+        "truncated": false
+      }
+    }
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-routes">API: Routes</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/routes/plan</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Plan a route with obstacle avoidance and terrain.</p>
+                    <div class="code-block">
+                        <pre>{
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0 },
+    { "lat": 33.6860, "lon": -117.8250, "altitude_m": 55.0 }
+  ],
+  "lane_radius_m": 90.0,
+  "lane_spacing_m": 15.0,
+  "sample_spacing_m": 5.0,
+  "safety_buffer_m": 20.0
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "ok": true,
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0, "phase": "CRUISE" },
+    { "lat": 33.6860, "lon": -117.8250, "altitude_m": 55.0, "phase": "CRUISE" }
+  ],
+  "stats": { "avg_agl": 30.0, "max_agl": 40.0, "max_altitude": 70.0 },
+  "nodes_visited": 1240,
+  "optimized_points": 420,
+  "sample_points": 900,
+  "hazards": [],
+  "errors": []
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-flights">API: Flights</h2>
+            <div class="callout warning">
+                <strong>Blender declarations:</strong> When <code class="code-inline">owner_id</code> is provided and
+                <code class="code-inline">ATC_REQUIRE_BLENDER_DECLARATION</code> is enabled (default), you must provide
+                <code class="code-inline">metadata.blender_declaration_id</code> that exists in Flight Blender.
+            </div>
+            <p>Flight status values: <code class="code-inline">pending</code>, <code class="code-inline">approved</code>,
+                <code class="code-inline">active</code>, <code class="code-inline">completed</code>,
+                <code class="code-inline">rejected</code>, <code class="code-inline">cancelled</code>.</p>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/flights</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>List flight plans.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/flights/plan</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Create a flight plan (standard request).</p>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "DRONE0001",
+  "owner_id": "owner-123",
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0, "speed_mps": 10.0 },
+    { "lat": 33.6860, "lon": -117.8250, "altitude_m": 55.0, "speed_mps": 10.0 }
+  ],
+  "trajectory_log": [
+    { "lat": 33.6846, "lon": -117.8265, "altitude_m": 50.0, "time_offset_s": 0.0 }
+  ],
+  "metadata": {
+    "drone_speed_mps": 10.0,
+    "total_distance_m": 1200.0,
+    "total_flight_time_s": 120.0,
+    "trajectory_points": 200,
+    "planned_altitude_m": 55.0,
+    "max_obstacle_height_m": 30.0,
+    "faa_compliant": true,
+    "submitted_at": "2025-01-01T00:00:00Z",
+    "blender_declaration_id": "decl-123",
+    "operation_type": 1,
+    "battery_capacity_min": 30.0,
+    "battery_reserve_min": 5.0,
+    "clearance_m": 60.0,
+    "compliance_override_enabled": false,
+    "compliance_override_notes": null,
+    "compliance_report": null
+  },
+  "departure_time": "2025-01-01T00:00:00Z"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/flights</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Create a flight plan (compat). Accepts either the standard request above or the planner
+                        request below.</p>
+                    <div class="code-block">
+                        <pre>{
+  "flight_id": "flight-123",
+  "waypoints": [
+    { "lat": 33.6846, "lon": -117.8265, "alt": 50.0, "time_offset": 0.0 },
+    { "lat": 33.6860, "lon": -117.8250, "alt": 55.0, "time_offset": 12.0 }
+  ],
+  "trajectory_log": [
+    { "lat": 33.6846, "lon": -117.8265, "alt": 50.0, "time_offset": 0.0 },
+    { "lat": 33.6860, "lon": -117.8250, "alt": 55.0, "time_offset": 12.0 }
+  ],
+  "owner_id": "owner-123",
+  "metadata": {
+    "drone_id": "DRONE0001",
+    "drone_speed_mps": 10.0,
+    "operation_type": 1,
+    "battery_capacity_min": 30.0,
+    "battery_reserve_min": 5.0,
+    "clearance_m": 60.0
+  }
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-rid">API: RID</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/rid/view</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Update the RID viewport bounding box.</p>
+                    <div class="code-block">
+                        <pre>{
+  "min_lat": 33.6546,
+  "min_lon": -117.8565,
+  "max_lat": 33.7146,
+  "max_lon": -117.7965
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "view": "33.6546,-117.8565,33.7146,-117.7965"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <h2 id="api-websockets">API: WebSockets</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/ws</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Realtime telemetry stream (DroneState messages).</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">token</code> - Optional token if WS auth is enabled.</li>
+                        <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                        <li><code class="code-inline">drone_id</code> - Filter by drone ID.</li>
+                    </ul>
+                    <div class="code-block">
+                        <pre>{
+  "drone_id": "DRONE0001",
+  "owner_id": "owner-123",
+  "lat": 33.6846,
+  "lon": -117.8265,
+  "altitude_m": 50.0,
+  "heading_deg": 90.0,
+  "speed_mps": 10.0,
+  "velocity_x": 10.0,
+  "velocity_y": 0.0,
+  "velocity_z": 0.0,
+  "last_update": "2025-01-01T00:00:00Z",
+  "status": "active"
+}</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/v1/commands/ws</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Command WebSocket stream (Command messages). Requires drone session token.</p>
+                    <strong>Query Parameters:</strong>
+                    <ul>
+                        <li><code class="code-inline">token</code> - Optional token (same as bearer).</li>
+                        <li><code class="code-inline">drone_id</code> - Optional filter.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <h2 id="api-admin">API: Admin</h2>
+            <div class="api-endpoint">
+                <div class="api-endpoint-header">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/v1/admin/reset</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <p>Reset all server state (dev/test). Enable with <code class="code-inline">ATC_ALLOW_ADMIN_RESET</code>.</p>
+                    <div class="code-block">
+                        <pre>{
+  "confirm": "RESET",
+  "require_idle": true
+}</pre>
+                    </div>
+                    <strong>Response:</strong>
+                    <div class="code-block">
+                        <pre>{
+  "cleared": true,
+  "active_drones": 0,
+  "message": "State reset"
+}</pre>
                     </div>
                 </div>
             </div>
 
             <h2 id="example-basic">Example: Basic Drone</h2>
-            <p>A complete example of a drone that registers and sends position updates:</p>
-
+            <p>A complete example that registers, sends telemetry, and handles commands.</p>
             <div class="code-block">
                 <pre>use atc_sdk::AtcClient;
 use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let client = AtcClient::new("http://localhost:3000");
-    
-    // Register
-    client.register_with_owner(
-        Some("my-drone"),
-        Some("myusername")
-    ).await?;
-    
+    let mut client = AtcClient::new("http://localhost:3000");
+    client.set_registration_token(Some("shared-token".to_string()));
+    client.register_with_owner(Some("my-drone"), Some("owner-123")).await?;
+
     let mut lat = 33.6846;
     let lon = -117.8265;
     let altitude = 50.0;
     let heading = 90.0;
     let speed = 5.0;
-    
+
     loop {
-        // Move north slowly
         lat += 0.00001;
-        
-        // Send telemetry
+
         client.send_position_with_owner(
             lat, lon, altitude, heading, speed,
-            Some("myusername".to_string())
+            Some("owner-123".to_string())
         ).await?;
-        
-        // Check for commands
-        if let Ok(commands) = client.get_commands().await {
-            for cmd in commands {
-                println!("Received command: {:?}", cmd);
-                // Handle command...
-            }
+
+        if let Some(cmd) = client.get_next_command().await? {
+            println!("Received command: {:?}", cmd.command_type);
+            client.ack_command(&cmd.command_id).await?;
         }
-        
+
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }</pre>
             </div>
 
             <div class="callout success">
-                <strong>Demo Available:</strong> Run <code
-                    class="code-inline">cargo run -p atc-cli --bin demo_scenario --release -- --owner myusername</code>
+                <strong>Demo Available:</strong> Run
+                <code class="code-inline">cargo run -p atc-cli --bin demo_scenario --release -- --owner owner-123</code>
                 to see a full demo with two drones and collision avoidance.
             </div>
 
-            <h2 id="example-mission">Example: Mission Flight</h2>
-            <p>Execute a predefined flight path with waypoints:</p>
-
+            <h2 id="example-command-stream">Example: Command Stream</h2>
+            <p>Use the WebSocket stream for low-latency commands.</p>
             <div class="code-block">
-                <pre>use atc_sdk::AtcClient;
+                <pre>let mut stream = client.connect_command_stream().await?;
 
-struct Waypoint { lat: f64, lon: f64, alt: f64 }
-
-async fn fly_mission(client: &AtcClient, waypoints: Vec<Waypoint>) {
-    for (i, wp) in waypoints.iter().enumerate() {
-        println!("Flying to waypoint {}", i + 1);
-        
-        // Fly to waypoint (simplified)
-        for _ in 0..100 {
-            client.send_position(
-                wp.lat, wp.lon, wp.alt,
-                calculate_heading(), 10.0
-            ).await.ok();
-            
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        
-        println!("Reached waypoint {}", i + 1);
-    }
+while let Some(cmd) = stream.next_command().await? {
+    println!("Streaming command: {}", cmd.command_id);
+    client.ack_command(&cmd.command_id).await?;
 }</pre>
+            </div>
+
+            <h2 id="example-flight-plan">Example: Flight Plan</h2>
+            <p>Create and submit a flight plan for compliance and conflict checks.</p>
+            <div class="code-block">
+                <pre>use atc_core::models::{FlightPlanRequest, Waypoint};
+
+let request = FlightPlanRequest {
+    drone_id: "DRONE0001".to_string(),
+    owner_id: Some("owner-123".to_string()),
+    waypoints: Some(vec![
+        Waypoint { lat: 33.6846, lon: -117.8265, altitude_m: 50.0, speed_mps: Some(10.0) },
+        Waypoint { lat: 33.6860, lon: -117.8250, altitude_m: 55.0, speed_mps: Some(10.0) },
+    ]),
+    trajectory_log: None,
+    metadata: None,
+    origin: None,
+    destination: None,
+    departure_time: None,
+};
+
+let plan = client.create_flight_plan(&request).await?;
+println!("Flight plan {}", plan.flight_id);</pre>
             </div>
         </main>
     </div>
