@@ -235,12 +235,12 @@
      * @param {string} ionToken - Cesium Ion access token
      * @returns {Promise<Cesium.Viewer>}
      */
-    async function initViewer(containerId, ionToken) {
-        Cesium.Ion.defaultAccessToken = ionToken;
+	    async function initViewer(containerId, ionToken) {
+	        Cesium.Ion.defaultAccessToken = ionToken;
 
-        console.log('[Planner] Initializing Cesium viewer...');
+	        console.log('[Planner] Initializing Cesium viewer...');
 
-        viewer = new Cesium.Viewer(containerId, {
+	        viewer = new Cesium.Viewer(containerId, {
             terrainProvider: await Cesium.createWorldTerrainAsync(),
             animation: false,
             timeline: false,
@@ -252,16 +252,20 @@
             navigationHelpButton: false,
             infoBox: true,
             fullscreenButton: false
-        });
+	        });
 
-        viewer.scene.globe.depthTestAgainstTerrain = true;
+	        viewer.scene.globe.depthTestAgainstTerrain = true;
 
-        // Load OSM Buildings
-        console.log('[Planner] Loading OSM Buildings tileset...');
-        osmTileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.OSM_BUILDINGS_ASSET_ID);
-        viewer.scene.primitives.add(osmTileset);
-        await osmTileset.readyPromise;
-        console.log('[Planner] OSM Buildings loaded');
+	        if (root.ATCCameraControls && typeof root.ATCCameraControls.attach === 'function') {
+	            root.ATCCameraControls.attach(viewer);
+	        }
+
+	        // Load OSM Buildings
+	        console.log('[Planner] Loading OSM Buildings tileset...');
+	        osmTileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.OSM_BUILDINGS_ASSET_ID);
+	        viewer.scene.primitives.add(osmTileset);
+	        await osmTileset.readyPromise;
+	        console.log('[Planner] OSM Buildings loaded');
 
         if (root.RoutePlanner && typeof root.RoutePlanner.init === 'function') {
             await root.RoutePlanner.init(viewer, {

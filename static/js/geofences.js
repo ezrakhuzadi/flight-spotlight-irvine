@@ -68,20 +68,24 @@
         viewer.clock.shouldAnimate = true;
         viewer.clock.multiplier = 1;
 
-        // Load Google Photorealistic 3D Tiles
-        try {
-            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
-            viewer.scene.primitives.add(tileset);
-            console.log('[Geofences] Google 3D Tiles loaded');
-        } catch (e) {
-            console.error('[Geofences] Failed to load 3D tiles:', e);
-        }
+	        // Load Google Photorealistic 3D Tiles
+	        try {
+	            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
+	            viewer.scene.primitives.add(tileset);
+	            console.log('[Geofences] Google 3D Tiles loaded');
+	        } catch (e) {
+	            console.error('[Geofences] Failed to load 3D tiles:', e);
+	        }
 
-        // Set initial view
-        resetView();
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(viewer);
+	        }
 
-        console.log('[Geofences] Viewer initialized');
-    }
+	        // Set initial view
+	        resetView();
+
+	        console.log('[Geofences] Viewer initialized');
+	    }
 
     async function loadGeofences() {
         try {

@@ -302,19 +302,23 @@
             mapState.viewer.imageryLayers.addImageryProvider(esriImagery);
         }
 
-        mapState.viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromDegrees(
-                CONFIG.DEFAULT_VIEW.lon,
+	        mapState.viewer.camera.setView({
+	            destination: Cesium.Cartesian3.fromDegrees(
+	                CONFIG.DEFAULT_VIEW.lon,
                 CONFIG.DEFAULT_VIEW.lat,
                 CONFIG.DEFAULT_VIEW.height
             ),
             orientation: {
                 heading: Cesium.Math.toRadians(0),
                 pitch: Cesium.Math.toRadians(-40),
-                roll: 0
-            }
-        });
-    }
+	                roll: 0
+	            }
+	        });
+
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(mapState.viewer);
+	        }
+	    }
 
     function clearRoute() {
         if (!mapState.viewer) return;

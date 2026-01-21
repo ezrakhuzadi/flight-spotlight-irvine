@@ -28,10 +28,10 @@
     function initViewer() {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
 
-        viewer = new Cesium.Viewer('geofenceMap', {
-            globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
-            skyAtmosphere: new Cesium.SkyAtmosphere(),
-            geocoder: false,
+	        viewer = new Cesium.Viewer('geofenceMap', {
+	            globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
+	            skyAtmosphere: new Cesium.SkyAtmosphere(),
+	            geocoder: false,
             homeButton: false,
             baseLayerPicker: false,
             infoBox: false,
@@ -42,14 +42,18 @@
             timeline: false,
             navigationHelpButton: false,
             shadows: false
-        });
+	        });
 
-        viewer.scene.globe.enableLighting = true;
+	        viewer.scene.globe.enableLighting = true;
 
-        viewer.camera.flyTo({
-            destination: Cesium.Cartesian3.fromDegrees(
-                CONFIG.DEFAULT_VIEW.lon,
-                CONFIG.DEFAULT_VIEW.lat,
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(viewer);
+	        }
+
+	        viewer.camera.flyTo({
+	            destination: Cesium.Cartesian3.fromDegrees(
+	                CONFIG.DEFAULT_VIEW.lon,
+	                CONFIG.DEFAULT_VIEW.lat,
                 CONFIG.DEFAULT_VIEW.height
             ),
             orientation: {

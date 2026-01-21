@@ -273,19 +273,23 @@
             state.viewer.imageryLayers.addImageryProvider(esriImagery);
         }
 
-        state.viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
-            orientation: {
-                heading: Cesium.Math.toRadians(0),
-                pitch: Cesium.Math.toRadians(-40),
-                roll: 0
-            }
-        });
+	        state.viewer.camera.setView({
+	            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
+	            orientation: {
+	                heading: Cesium.Math.toRadians(0),
+	                pitch: Cesium.Math.toRadians(-40),
+	                roll: 0
+	            }
+	        });
 
-        const handler = new Cesium.ScreenSpaceEventHandler(state.viewer.scene.canvas);
-        handler.setInputAction((movement) => {
-            const cartesian = pickPosition(movement.position);
-            if (!cartesian) return;
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(state.viewer);
+	        }
+
+	        const handler = new Cesium.ScreenSpaceEventHandler(state.viewer.scene.canvas);
+	        handler.setInputAction((movement) => {
+	            const cartesian = pickPosition(movement.position);
+	            if (!cartesian) return;
             const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
             const lat = Cesium.Math.toDegrees(cartographic.latitude);
             const lon = Cesium.Math.toDegrees(cartographic.longitude);

@@ -179,18 +179,22 @@
             }
         }
 
-        // Set default view to Irvine
-        viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
-            orientation: {
-                heading: Cesium.Math.toRadians(0),
-                pitch: Cesium.Math.toRadians(-45),
-                roll: 0
-            }
-        });
+	        // Set default view to Irvine
+	        viewer.camera.setView({
+	            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
+	            orientation: {
+	                heading: Cesium.Math.toRadians(0),
+	                pitch: Cesium.Math.toRadians(-45),
+	                roll: 0
+	            }
+	        });
 
-        // Set up event handlers
-        setupEventHandlers();
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(viewer);
+	        }
+
+	        // Set up event handlers
+	        setupEventHandlers();
 
         // Start polling loops
         startPollingLoops();

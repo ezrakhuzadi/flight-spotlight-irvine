@@ -82,25 +82,29 @@
             console.error('[RemoteID] Failed to load 3D tiles:', e);
         }
 
-        // Set initial view
-        viewer.camera.flyTo({
-            destination: Cesium.Cartesian3.fromDegrees(
-                CONFIG.DEFAULT_VIEW.lon,
+	        // Set initial view
+	        viewer.camera.flyTo({
+	            destination: Cesium.Cartesian3.fromDegrees(
+	                CONFIG.DEFAULT_VIEW.lon,
                 CONFIG.DEFAULT_VIEW.lat,
                 CONFIG.DEFAULT_VIEW.height
             ),
             orientation: {
                 heading: Cesium.Math.toRadians(0),
                 pitch: Cesium.Math.toRadians(-45),
-                roll: 0
-            }
-        });
+	                roll: 0
+	            }
+	        });
 
-        // Start data refresh
-        startDataRefresh();
+	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+	            window.ATCCameraControls.attach(viewer);
+	        }
 
-        console.log('[RemoteID] Viewer initialized');
-    }
+	        // Start data refresh
+	        startDataRefresh();
+
+	        console.log('[RemoteID] Viewer initialized');
+	    }
 
     // ========================================================================
     // Data Fetching

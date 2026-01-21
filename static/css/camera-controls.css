@@ -1,0 +1,112 @@
+.atc-camera-controls {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 20;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.atc-camera-controls__panel {
+    min-width: 168px;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color, var(--border, #475569));
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.4));
+    padding: 10px;
+}
+
+.atc-camera-controls__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.6);
+    margin-bottom: 10px;
+}
+
+.atc-camera-controls__title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted, #64748b);
+}
+
+.atc-camera-controls__toggle {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(71, 85, 105, 0.8);
+    background: transparent;
+    color: var(--text-secondary, #94a3b8);
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.15s ease);
+    font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.atc-camera-controls__toggle:hover {
+    background: rgba(51, 65, 85, 0.7);
+    color: var(--text-primary, #f1f5f9);
+    border-color: rgba(56, 189, 248, 0.65);
+}
+
+.atc-camera-controls__row {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.atc-camera-controls__row--zoom {
+    margin-bottom: 0;
+}
+
+.atc-camera-controls__grid {
+    display: grid;
+    grid-template-columns: repeat(3, 34px);
+    grid-template-rows: repeat(3, 34px);
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.atc-camera-controls__btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(71, 85, 105, 0.8);
+    background: transparent;
+    color: var(--text-secondary, #94a3b8);
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.15s ease);
+    font-weight: 700;
+    font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.atc-camera-controls__btn:hover {
+    background: rgba(51, 65, 85, 0.7);
+    color: var(--text-primary, #f1f5f9);
+    border-color: rgba(56, 189, 248, 0.65);
+}
+
+.atc-camera-controls__btn--primary {
+    border-color: rgba(56, 189, 248, 0.75);
+    color: var(--accent-blue, #38bdf8);
+}
+
+.atc-camera-controls__btn--primary:hover {
+    background: rgba(56, 189, 248, 0.18);
+    color: var(--text-primary, #f1f5f9);
+}
