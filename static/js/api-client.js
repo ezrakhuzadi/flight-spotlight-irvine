@@ -8,6 +8,19 @@ const API = (function () {
 
     // Configuration
     const ATC_SERVER_URL = window.__ATC_API_BASE__ || 'http://localhost:3000';
+    const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+    function getCsrfToken() {
+        if (typeof window === 'undefined') return '';
+        if (window.__CSRF_TOKEN__) return window.__CSRF_TOKEN__;
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta?.getAttribute('content') || '';
+    }
+
+    function isSafeMethod(method) {
+        const value = typeof method === 'string' ? method.toUpperCase() : 'GET';
+        return SAFE_METHODS.has(value);
+    }
 
     // State
     let lastUpdate = null;
@@ -240,15 +253,24 @@ const API = (function () {
 
     async function request(endpoint, options = {}) {
         const url = `${ATC_SERVER_URL}${endpoint}`;
+        const method = options.method ? String(options.method).toUpperCase() : 'GET';
+        const csrfToken = getCsrfToken();
+        const headers = {
+            ...(options.headers || {})
+        };
+
+        if (!headers['Content-Type'] && !headers['content-type']) {
+            headers['Content-Type'] = 'application/json';
+        }
+        if (!isSafeMethod(method) && csrfToken && !headers['X-CSRF-Token'] && !headers['X-Csrf-Token'] && !headers['x-csrf-token']) {
+            headers['X-CSRF-Token'] = csrfToken;
+        }
 
         try {
             const response = await fetch(url, {
                 credentials: 'same-origin',
                 ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
+                headers
             });
 
             if (!response.ok) {
@@ -272,14 +294,24 @@ const API = (function () {
     }
 
     async function requestLocal(endpoint, options = {}) {
+        const method = options.method ? String(options.method).toUpperCase() : 'GET';
+        const csrfToken = getCsrfToken();
+        const headers = {
+            ...(options.headers || {})
+        };
+
+        if (!headers['Content-Type'] && !headers['content-type']) {
+            headers['Content-Type'] = 'application/json';
+        }
+        if (!isSafeMethod(method) && csrfToken && !headers['X-CSRF-Token'] && !headers['X-Csrf-Token'] && !headers['x-csrf-token']) {
+            headers['X-CSRF-Token'] = csrfToken;
+        }
+
         try {
             const response = await fetch(endpoint, {
                 credentials: 'same-origin',
                 ...options,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                }
+                headers
             });
 
             if (!response.ok) {

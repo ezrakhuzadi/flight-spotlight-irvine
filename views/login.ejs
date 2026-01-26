@@ -185,6 +185,7 @@
             <% } %>
 
                 <form action="/login" method="POST">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
                     <div class="form-group">
                         <label class="form-label" for="username">Username</label>
                         <input type="text" id="username" name="username" class="form-input" placeholder="Enter username"
@@ -205,6 +206,7 @@
                 <div class="divider"><span>or</span></div>
 
                 <form action="/login/guest" method="POST">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
                     <button type="submit" class="login-btn login-btn-guest">
                         Continue as Guest
                     </button>

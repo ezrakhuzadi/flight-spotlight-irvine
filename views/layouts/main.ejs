@@ -16,6 +16,8 @@
     <!-- Styles -->
     <link rel="stylesheet" href="/assets/css/mission-control.css">
     <link rel="stylesheet" href="/assets/css/camera-controls.css">
+
+    <meta name="csrf-token" content="<%= csrfToken || '' %>">
     
     <%- typeof head !== 'undefined' ? head : '' %>
 </head>
@@ -35,6 +37,7 @@
     
     <script>
         window.APP_USER = <%- JSON.stringify(user || null) %>;
+        window.__CSRF_TOKEN__ = <%- JSON.stringify(csrfToken || '') %>;
         window.__ATC_API_BASE__ = "<%= typeof atcApiBase !== 'undefined' ? atcApiBase : '' %>";
         window.__ATC_WS_BASE__ = "<%= typeof atcWsBase !== 'undefined' ? atcWsBase : '' %>";
         window.__ATC_WS_TOKEN__ = "<%= typeof atcWsToken !== 'undefined' ? atcWsToken : '' %>";

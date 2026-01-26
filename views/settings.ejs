@@ -37,6 +37,7 @@
                                 </div>
                                 <div class="card-body">
                                     <form action="/account/update-profile" method="POST">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
                                         <div class="form-group">
                                             <label class="form-label">Username</label>
                                             <input type="text" class="form-input" value="<%= user ? user.id : '' %>"
@@ -75,6 +76,7 @@
                                 </div>
                                 <div class="card-body">
                                     <form action="/account/change-password" method="POST">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
                                         <div class="form-group">
                                             <label class="form-label">Current Password</label>
                                             <input type="password" class="form-input" name="currentPassword" required>
@@ -131,6 +133,7 @@
                                     </p>
                                     <form action="/account/delete" method="POST"
                                         onsubmit="return confirm('Are you sure?');">
+                                        <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
                                         <button type="submit" class="btn btn-danger" <% if (user && (user.id==='guest'
                                             || user.id==='admin' )) { %>disabled<% } %>>
                                                 Delete Account

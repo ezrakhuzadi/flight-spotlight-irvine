@@ -336,14 +336,62 @@
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
   });
   app.use(sessionMiddleware);
 
+  function timingSafeEqual(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    const aBuf = Buffer.from(a);
+    const bBuf = Buffer.from(b);
+    if (aBuf.length !== bBuf.length) return false;
+    return crypto.timingSafeEqual(aBuf, bBuf);
+  }
+
+  function ensureCsrfToken(req) {
+    if (!req.session) return null;
+    if (!req.session.csrfToken) {
+      req.session.csrfToken = crypto.randomBytes(32).toString("hex");
+    }
+    return req.session.csrfToken;
+  }
+
+  function readCsrfToken(req) {
+    const header = req.get("X-CSRF-Token") || req.get("X-Csrf-Token");
+    if (header) return header;
+    const body = req.body && typeof req.body === "object" ? req.body : null;
+    return body?._csrf || body?.csrfToken || body?.csrf_token || null;
+  }
+
+  function csrfProtection(req, res, next) {
+    const method = req.method ? req.method.toUpperCase() : "GET";
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
+
+    const expected = req.session?.csrfToken;
+    const provided = readCsrfToken(req);
+    if (!expected || !provided || !timingSafeEqual(provided, expected)) {
+      return res.status(403).json({ message: "csrf_rejected" });
+    }
+    next();
+  }
+
+  app.use((req, _res, next) => {
+    if (req.session?.user || req.path === "/login" || req.path === "/signup") {
+      ensureCsrfToken(req);
+    }
+    next();
+  });
+
+  // Require CSRF protection for any state-changing requests.
+  app.use(csrfProtection);
+
   // Make user available to all views
   app.use((req, res, next) => {
     res.locals.user = req.session.user || null;
+    res.locals.csrfToken = req.session?.csrfToken || "";
     res.locals.atcApiBase = ATC_PROXY_BASE;
     // Always use a same-origin WS proxy so browsers don't need Docker-internal DNS.
     res.locals.atcWsBase = ATC_PROXY_BASE;

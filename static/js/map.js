@@ -364,7 +364,8 @@
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
                 },
                 body: JSON.stringify(view)
             });

@@ -246,7 +246,10 @@
                 {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+                    },
                     body: JSON.stringify(payload)
                 }
             );
@@ -466,7 +469,10 @@
             const response = await fetch(`${CONFIG.RID_PROXY_BASE}/api/rid/demo`, {
                 method: 'POST',
                 credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+                },
                 body: JSON.stringify({
                     center,
                     subscription_id: lastViewParam || null

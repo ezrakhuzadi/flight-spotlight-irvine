@@ -174,7 +174,11 @@
 
         const response = await fetch(joinUrl(ATC_SERVER_URL, '/v1/routes/plan'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+            },
             body: JSON.stringify(payload)
         });
 
