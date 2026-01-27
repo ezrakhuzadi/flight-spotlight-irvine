@@ -30,13 +30,13 @@
         WS_RETRY_MS: 5000,
         SHOW_EXTERNAL_TRAFFIC: true,
         REFRESH_INTERVALS: {
-            drones: 1000,
-            conflicts: 2000,
-            flightPlans: 5000,
-            geofences: 10000,
-            health: 5000,
-            conformance: 8000,
-            daa: 4000
+            drones: 2000,
+            conflicts: 4000,
+            flightPlans: 10000,
+            geofences: 15000,
+            health: 10000,
+            conformance: 12000,
+            daa: 6000
         }
     };
 
@@ -75,6 +75,7 @@
     let wsReconnectAttempts = 0;
     let wsConnectionStableTimer = null;
     let wsLastConnectTime = null;
+    const pollingIntervals = new Map();
 
     // Drone tracking
     const droneEntities = new Map();  // droneId -> Cesium.Entity
@@ -198,9 +199,17 @@
 	        setupEventHandlers();
 
         // Start polling loops
-        startPollingLoops();
-        startRealtime();
-        scheduleRidViewUpdate();
+        document.addEventListener('visibilitychange', () => {
+            if (!viewer) return;
+            if (document.hidden) {
+                stopPollingLoops();
+            } else {
+                startPollingLoops();
+            }
+        });
+	        startPollingLoops();
+	        startRealtime();
+	        scheduleRidViewUpdate();
 
         // Check for tracking param from URL
         const params = new URLSearchParams(window.location.search);
@@ -378,30 +387,48 @@
     // Polling Loops
     // ========================================================================
 
+    function stopPollingLoops() {
+        for (const timer of pollingIntervals.values()) {
+            clearInterval(timer);
+        }
+        pollingIntervals.clear();
+    }
+
+    function setPollingInterval(key, fn, intervalMs) {
+        const existing = pollingIntervals.get(key);
+        if (existing) {
+            clearInterval(existing);
+        }
+        pollingIntervals.set(key, setInterval(fn, intervalMs));
+    }
+
     function startPollingLoops() {
+        if (document.hidden) return;
+        stopPollingLoops();
+
         // Drones
         fetchDrones();
-        setInterval(fetchDrones, CONFIG.REFRESH_INTERVALS.drones);
+        setPollingInterval('drones', fetchDrones, CONFIG.REFRESH_INTERVALS.drones);
 
         // Conflicts
         fetchConflicts();
-        setInterval(fetchConflicts, CONFIG.REFRESH_INTERVALS.conflicts);
+        setPollingInterval('conflicts', fetchConflicts, CONFIG.REFRESH_INTERVALS.conflicts);
 
         // Flight plans
         fetchFlightPlans();
-        setInterval(fetchFlightPlans, CONFIG.REFRESH_INTERVALS.flightPlans);
+        setPollingInterval('flightPlans', fetchFlightPlans, CONFIG.REFRESH_INTERVALS.flightPlans);
 
         // Geofences
         fetchGeofences();
-        setInterval(fetchGeofences, CONFIG.REFRESH_INTERVALS.geofences);
+        setPollingInterval('geofences', fetchGeofences, CONFIG.REFRESH_INTERVALS.geofences);
 
         // Conformance
         fetchConformance();
-        setInterval(fetchConformance, CONFIG.REFRESH_INTERVALS.conformance);
+        setPollingInterval('conformance', fetchConformance, CONFIG.REFRESH_INTERVALS.conformance);
 
         // DAA
         fetchDaa();
-        setInterval(fetchDaa, CONFIG.REFRESH_INTERVALS.daa);
+        setPollingInterval('daa', fetchDaa, CONFIG.REFRESH_INTERVALS.daa);
     }
 
     // ========================================================================
