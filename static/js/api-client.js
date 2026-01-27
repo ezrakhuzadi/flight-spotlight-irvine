@@ -532,10 +532,14 @@ const API = (function () {
                 body: JSON.stringify(plan)
             });
         },
-        getFlightPlans: (ownerId = null) => {
+        getFlightPlans: (ownerId = null, options = {}) => {
             const effectiveOwnerId = getEffectiveOwnerId(ownerId);
             const params = new URLSearchParams();
             if (effectiveOwnerId) params.set('owner_id', effectiveOwnerId);
+            const limit = options?.limit ?? 1000;
+            const offset = options?.offset ?? 0;
+            if (Number.isFinite(limit) && limit > 0) params.set('limit', String(limit));
+            if (Number.isFinite(offset) && offset > 0) params.set('offset', String(offset));
             const url = `/v1/flights${params.toString() ? `?${params.toString()}` : ''}`;
             return request(url);
         },

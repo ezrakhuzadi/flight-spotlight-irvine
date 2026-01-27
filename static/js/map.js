@@ -1116,6 +1116,7 @@
             const params = new URLSearchParams();
             const ownerId = getOwnerFilterId();
             if (ownerId) params.set('owner_id', ownerId);
+            params.set('limit', '1000');
             const endpoint = `/v1/flights${params.toString() ? `?${params.toString()}` : ''}`;
             const response = await fetch(CONFIG.ATC_SERVER_URL + endpoint, {
                 credentials: 'same-origin'
@@ -1123,6 +1124,7 @@
             if (!response.ok) return;
 
             const plans = await response.json();
+            flightPlans.clear();
             plans.forEach(plan => {
                 flightPlans.set(plan.drone_id, plan);
             });

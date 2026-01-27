@@ -1225,6 +1225,8 @@ while let Some(cmd) = stream.next_command().await? {
                     <strong>Query Parameters:</strong>
                     <ul>
                         <li><code class="code-inline">owner_id</code> - Filter by owner ID.</li>
+                        <li><code class="code-inline">limit</code> - Page size (default: <code class="code-inline">ATC_FLIGHTS_DEFAULT_LIMIT</code>, max: <code class="code-inline">ATC_FLIGHTS_MAX_LIMIT</code>).</li>
+                        <li><code class="code-inline">offset</code> - Offset into the result set.</li>
                     </ul>
                 </div>
             </div>

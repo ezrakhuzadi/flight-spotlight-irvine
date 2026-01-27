@@ -910,19 +910,30 @@
     try {
       const ownerId = req.session.user?.id;
       if (!ownerId) return false;
-      const response = await axios.get(`${ATC_URL}/v1/flights`, {
-        params: { owner_id: ownerId },
-        headers: { "X-Request-ID": req.requestId || "" },
-        timeout: 8000,
-        validateStatus: () => true
-      });
-      if (!response || response.status >= 400) {
-        console.error("[ATC Proxy] Flight lookup failed:", response?.status);
-        return false;
-      }
+      const limit = 1000;
+      let offset = 0;
+      for (let page = 0; page < 10; page += 1) {
+        const response = await axios.get(`${ATC_URL}/v1/flights`, {
+          params: { owner_id: ownerId, limit, offset },
+          headers: { "X-Request-ID": req.requestId || "" },
+          timeout: 8000,
+          validateStatus: () => true
+        });
+        if (!response || response.status >= 400) {
+          console.error("[ATC Proxy] Flight lookup failed:", response?.status);
+          return false;
+        }
 
-      const plans = Array.isArray(response.data) ? response.data : [];
-      return plans.some(entry => entry.flight_id === flightId);
+        const plans = Array.isArray(response.data) ? response.data : [];
+        if (plans.some(entry => entry.flight_id === flightId)) {
+          return true;
+        }
+        if (plans.length < limit) {
+          return false;
+        }
+        offset += limit;
+      }
+      return false;
     } catch (error) {
       console.error("[ATC Proxy] Flight lookup error:", error.message);
       return false;
