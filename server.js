@@ -777,7 +777,15 @@
     { methods: ["POST"], pattern: /^\/v1\/operational_intents\/reserve$/ },
     { methods: ["POST"], pattern: /^\/v1\/operational_intents\/[^/]+\/confirm$/ },
     { methods: ["POST"], pattern: /^\/v1\/operational_intents\/[^/]+\/cancel$/ },
-    { methods: ["PUT"], pattern: /^\/v1\/operational_intents\/[^/]+$/ }
+    { methods: ["PUT"], pattern: /^\/v1\/operational_intents\/[^/]+$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/reset$/ },
+    { methods: ["GET", "POST"], pattern: /^\/v1\/admin\/commands$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/flights\/plan$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/flights$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/operational_intents\/reserve$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/operational_intents\/[^/]+\/confirm$/ },
+    { methods: ["POST"], pattern: /^\/v1\/admin\/operational_intents\/[^/]+\/cancel$/ },
+    { methods: ["PUT"], pattern: /^\/v1\/admin\/operational_intents\/[^/]+$/ }
   ];
 
   function isAllowedAtcProxy(method, requestPath) {
@@ -788,7 +796,10 @@
 
   function resolveAtcProxyTimeoutMs(method, requestPath) {
     const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "";
-    const path = typeof requestPath === "string" ? requestPath : "";
+    const rawPath = typeof requestPath === "string" ? requestPath : "";
+    const path = rawPath.startsWith("/v1/admin")
+      ? `/v1${rawPath.slice("/v1/admin".length)}`
+      : rawPath;
     if (normalizedMethod === "POST") {
       if (path === "/v1/routes/plan" || path === "/v1/compliance/evaluate") {
         return 180_000;
@@ -816,6 +827,9 @@
   }
 
   function requiresAdminTokenForAtc(method, requestPath) {
+    if (requestPath.startsWith("/v1/admin")) {
+      return true;
+    }
     if (requestPath === "/v1/commands" && ["GET", "POST"].includes(method)) {
       return true;
     }
