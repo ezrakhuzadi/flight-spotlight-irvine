@@ -9,6 +9,7 @@
   const fs = require("fs");
   const bcrypt = require("bcryptjs");
   const axios = require("axios");
+  const https = require("https");
   const net = require("net");
   const tls = require("tls");
   const { initUserStore } = require("./util/user-store");
@@ -30,6 +31,7 @@
   const IS_PRODUCTION = process.env.NODE_ENV === "production";
   const DEMO_MODE = process.env.DEMO_MODE === "1";
   const LOG_REQUESTS = process.env.ATC_FRONTEND_LOG_REQUESTS === "1";
+  const ATC_SERVER_CA_CERT_PATH = (process.env.ATC_SERVER_CA_CERT_PATH || "").trim();
   const PASSWORD_ALGO = "bcrypt";
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
   const ALLOW_DEFAULT_USERS = process.env.ATC_ALLOW_DEFAULT_USERS === "1";
@@ -38,6 +40,35 @@
   const OSM_BUILDINGS_ASSET_ID = Number(process.env.OSM_BUILDINGS_ASSET_ID);
   const ROUTE_ENGINE_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_ENGINE_CONFIG, "ATC_ROUTE_ENGINE_CONFIG");
   const ROUTE_PLANNER_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_PLANNER_CONFIG, "ATC_ROUTE_PLANNER_CONFIG");
+
+  let atcCaCert = null;
+  if (ATC_SERVER_CA_CERT_PATH) {
+    try {
+      atcCaCert = fs.readFileSync(ATC_SERVER_CA_CERT_PATH);
+    } catch (error) {
+      console.warn("[CONFIG] Failed to read ATC_SERVER_CA_CERT_PATH:", error.message);
+    }
+  }
+
+  let atcHttpsAgent = null;
+  try {
+    const parsed = new URL(ATC_URL);
+    if (parsed.protocol === "https:") {
+      atcHttpsAgent = new https.Agent({
+        keepAlive: true,
+        rejectUnauthorized: IS_PRODUCTION,
+        ca: atcCaCert ? [atcCaCert] : undefined
+      });
+    }
+  } catch (error) {
+    console.warn("[CONFIG] ATC_SERVER_URL is not a valid URL:", error.message);
+  }
+
+  const atcAxios = axios.create({
+    baseURL: ATC_URL,
+    validateStatus: () => true,
+    ...(atcHttpsAgent ? { httpsAgent: atcHttpsAgent } : {})
+  });
 
   const DEFAULT_COMPLIANCE_LIMITS = {
     maxWindMps: 12,
@@ -80,9 +111,8 @@
       return COMPLIANCE_LIMITS;
     }
     try {
-      const response = await axios.get(`${ATC_URL}/v1/compliance/limits`, {
-        timeout: 2500,
-        validateStatus: () => true
+      const response = await atcAxios.get("/v1/compliance/limits", {
+        timeout: 2500
       });
       if (response.status === 200) {
         const normalized = normalizeComplianceLimits(response.data);
@@ -693,11 +723,10 @@
   async function getOwnedDroneIds(userId, requestId = "") {
     if (!userId) return new Set();
     try {
-      const response = await axios.get(`${ATC_URL}/v1/drones`, {
+      const response = await atcAxios.get("/v1/drones", {
         params: { owner_id: userId },
         headers: { "X-Request-ID": requestId },
-        timeout: 8000,
-        validateStatus: () => true
+        timeout: 8000
       });
       if (!response || response.status >= 400) {
         return new Set();
@@ -901,10 +930,9 @@
     if (isAuthority(req)) return true;
 
     try {
-      const response = await axios.get(`${ATC_URL}/v1/drones`, {
+      const response = await atcAxios.get("/v1/drones", {
         headers: { "X-Request-ID": req.requestId || "" },
-        timeout: 8000,
-        validateStatus: () => true
+        timeout: 8000
       });
       if (!response || response.status >= 400) {
         console.error("[ATC Proxy] Drone lookup failed:", response?.status);
@@ -936,11 +964,10 @@
       const limit = 1000;
       let offset = 0;
       for (let page = 0; page < 10; page += 1) {
-        const response = await axios.get(`${ATC_URL}/v1/flights`, {
+        const response = await atcAxios.get("/v1/flights", {
           params: { owner_id: ownerId, limit, offset },
           headers: { "X-Request-ID": req.requestId || "" },
-          timeout: 8000,
-          validateStatus: () => true
+          timeout: 8000
         });
         if (!response || response.status >= 400) {
           console.error("[ATC Proxy] Flight lookup failed:", response?.status);
@@ -974,7 +1001,7 @@
     const requestPath = req.path.startsWith(ATC_PROXY_BASE)
       ? req.path.slice(ATC_PROXY_BASE.length)
       : req.path;
-    const url = `${ATC_URL}${targetPath}`;
+    const url = targetPath;
     const method = req.method.toUpperCase();
     if (!isAllowedAtcProxy(method, requestPath)) {
       return res.status(404).json({ message: "not_found" });
@@ -1064,12 +1091,11 @@
       }
 
       const timeout = resolveAtcProxyTimeoutMs(method, requestPath);
-      const response = await axios({
+      const response = await atcAxios({
         method,
         url,
         data,
         timeout,
-        validateStatus: () => true,
         headers
       });
 
@@ -1395,8 +1421,9 @@
       const upstream = isTls
         ? tls.connect({
           ...connectOptions,
+          ca: atcCaCert ? [atcCaCert] : undefined,
           servername: host,
-          rejectUnauthorized: process.env.NODE_ENV === "production"
+          rejectUnauthorized: IS_PRODUCTION
         })
         : net.connect(connectOptions);
 
