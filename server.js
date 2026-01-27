@@ -874,6 +874,12 @@
     if (requestPath === "/v1/commands" && ["GET", "POST"].includes(method)) {
       return true;
     }
+    if (requestPath === "/v1/routes/plan" && method === "POST") {
+      return true;
+    }
+    if (requestPath === "/v1/compliance/evaluate" && method === "POST") {
+      return true;
+    }
     if (requestPath === "/v1/flights/plan" && method === "POST") {
       return true;
     }
