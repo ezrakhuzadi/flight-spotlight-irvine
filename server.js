@@ -29,7 +29,7 @@
   const BLENDER_AUTH_TOKEN = process.env.BLENDER_AUTH_TOKEN || "";
   const IS_PRODUCTION = process.env.NODE_ENV === "production";
   const DEMO_MODE = process.env.DEMO_MODE === "1";
-  const LOG_REQUESTS = !IS_PRODUCTION || process.env.ATC_FRONTEND_LOG_REQUESTS === "1";
+  const LOG_REQUESTS = process.env.ATC_FRONTEND_LOG_REQUESTS === "1";
   const PASSWORD_ALGO = "bcrypt";
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
   const ALLOW_DEFAULT_USERS = process.env.ATC_ALLOW_DEFAULT_USERS === "1";
