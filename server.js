@@ -365,19 +365,36 @@
   app.use("/assets", express.static("static"));
 
   // Session middleware
-  const sessionPath = process.env.SESSION_STORE_PATH || path.join(__dirname, "data", "sessions");
-  fs.mkdirSync(sessionPath, { recursive: true });
+  const sessionRedisUrl = cleanEnv(process.env.ATC_SESSION_REDIS_URL || process.env.SESSION_REDIS_URL);
   const rawSessionSecret = cleanEnv(process.env.SESSION_SECRET);
   if (!rawSessionSecret && process.env.NODE_ENV === "production") {
     throw new Error("SESSION_SECRET must be set in production.");
   }
   const sessionSecret = rawSessionSecret || crypto.randomBytes(32).toString("hex");
 
-  const sessionMiddleware = session({
-    store: new FileStore({
+  let sessionStore;
+  if (sessionRedisUrl) {
+    const RedisStore = require("connect-redis").default;
+    const { createClient } = require("redis");
+    const redisClient = createClient({ url: sessionRedisUrl });
+    redisClient.on("error", (err) => {
+      console.error("[SESSION] Redis error:", err?.message || String(err));
+    });
+    await redisClient.connect();
+    sessionStore = new RedisStore({ client: redisClient, prefix: "atc-frontend:sess:" });
+    console.log("[SESSION] Using Redis session store");
+  } else {
+    const sessionPath = process.env.SESSION_STORE_PATH || path.join(__dirname, "data", "sessions");
+    fs.mkdirSync(sessionPath, { recursive: true });
+    sessionStore = new FileStore({
       path: sessionPath,
       logFn: () => { }
-    }),
+    });
+    console.log("[SESSION] Using file session store:", sessionPath);
+  }
+
+  const sessionMiddleware = session({
+    store: sessionStore,
     secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
