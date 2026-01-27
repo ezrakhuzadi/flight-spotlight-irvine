@@ -303,6 +303,19 @@
   let app = express();
   app.disable("x-powered-by");
 
+  function getOrCreateRequestId(req) {
+    const existing = typeof req.get === "function" ? req.get("X-Request-ID") : "";
+    const cleaned = typeof existing === "string" ? existing.trim() : "";
+    return cleaned || crypto.randomUUID();
+  }
+
+  app.use((req, res, next) => {
+    const requestId = getOrCreateRequestId(req);
+    req.requestId = requestId;
+    res.setHeader("X-Request-ID", requestId);
+    next();
+  });
+
   // Provide defaults even if a render bypasses res.locals middleware.
   app.locals.routeEngineConfig = ROUTE_ENGINE_CONFIG || {};
   app.locals.routePlannerConfig = ROUTE_PLANNER_CONFIG || {};
@@ -316,7 +329,8 @@
   });
 
   app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.url}`);
+    const requestId = req.requestId || "-";
+    console.log(`[REQUEST] ${req.method} ${req.url} rid=${requestId}`);
     next();
   });
 
@@ -635,11 +649,12 @@
     return String(value || "").trim().toLowerCase();
   }
 
-  async function getOwnedDroneIds(userId) {
+  async function getOwnedDroneIds(userId, requestId = "") {
     if (!userId) return new Set();
     try {
       const response = await axios.get(`${ATC_URL}/v1/drones`, {
         params: { owner_id: userId },
+        headers: { "X-Request-ID": requestId },
         timeout: 8000,
         validateStatus: () => true
       });
@@ -670,16 +685,19 @@
     try {
       const token = ensureBlenderToken(["flightblender.read", "flightblender.write"], res);
       if (!token) return;
-      const response = await axios.put(
-        `${BLENDER_URL}/rid/create_dss_subscription`,
-        null,
-        {
-          params: { view },
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 8000,
-          validateStatus: () => true
-        }
-      );
+          const response = await axios.put(
+            `${BLENDER_URL}/rid/create_dss_subscription`,
+            null,
+            {
+              params: { view },
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "X-Request-ID": req.requestId || ""
+              },
+              timeout: 8000,
+              validateStatus: () => true
+            }
+          );
       res.status(response.status).json(parseBlenderPayload(response.data));
     } catch (error) {
       console.error("[RID Proxy] Subscription error:", error.message);
@@ -694,7 +712,7 @@
       const response = await axios.get(
         `${BLENDER_URL}/rid/get_rid_data/${req.params.subscriptionId}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
           timeout: 8000,
           validateStatus: () => true
         }
@@ -718,7 +736,7 @@
         `${BLENDER_URL}/rid/tests/${testId}`,
         payload,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
           timeout: 10000,
           validateStatus: () => true
         }
@@ -823,6 +841,7 @@
 
     try {
       const response = await axios.get(`${ATC_URL}/v1/drones`, {
+        headers: { "X-Request-ID": req.requestId || "" },
         timeout: 8000,
         validateStatus: () => true
       });
@@ -855,6 +874,7 @@
       if (!ownerId) return false;
       const response = await axios.get(`${ATC_URL}/v1/flights`, {
         params: { owner_id: ownerId },
+        headers: { "X-Request-ID": req.requestId || "" },
         timeout: 8000,
         validateStatus: () => true
       });
@@ -961,7 +981,8 @@
 
     try {
       const headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Request-ID": req.requestId || ""
       };
       if (requestPath === "/v1/drones/register" && ATC_REGISTRATION_TOKEN) {
         headers["X-Registration-Token"] = ATC_REGISTRATION_TOKEN;
@@ -1014,7 +1035,7 @@
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration`,
         {
           params: req.query,
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
           timeout: 10000,
           validateStatus: () => true
         }
@@ -1022,7 +1043,7 @@
       let payload = parseBlenderPayload(response.data);
       if (!isAuthority(req)) {
         const userEmail = normalizeEmail(req.session.user?.email);
-        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id);
+        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id, req.requestId || "");
         const records = Array.isArray(payload)
           ? payload
           : Array.isArray(payload?.results)
@@ -1051,7 +1072,7 @@
       const response = await axios.get(
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${req.params.id}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
           timeout: 10000,
           validateStatus: () => true
         }
@@ -1059,7 +1080,7 @@
       let payload = parseBlenderPayload(response.data);
       if (!isAuthority(req) && response.status < 400) {
         const userEmail = normalizeEmail(req.session.user?.email);
-        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id);
+        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id, req.requestId || "");
         if (!declarationVisibleForUser(payload, userEmail, ownedDroneIds)) {
           return res.status(403).json({ message: "forbidden_declaration" });
         }
@@ -1092,7 +1113,8 @@
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Request-ID": req.requestId || ""
           },
           timeout: 10000,
           validateStatus: () => true
@@ -1118,7 +1140,7 @@
         const detail = await axios.get(
           `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}`,
           {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
             timeout: 10000,
             validateStatus: () => true
           }
@@ -1128,7 +1150,7 @@
         }
         const payload = parseBlenderPayload(detail.data);
         const userEmail = normalizeEmail(req.session.user?.email);
-        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id);
+        const ownedDroneIds = await getOwnedDroneIds(req.session.user?.id, req.requestId || "");
         if (!declarationVisibleForUser(payload, userEmail, ownedDroneIds)) {
           return res.status(403).json({ message: "forbidden_declaration" });
         }
@@ -1139,7 +1161,7 @@
       const response = await axios.delete(
         `${BLENDER_URL}/flight_declaration_ops/flight_declaration/${declarationId}/delete`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, "X-Request-ID": req.requestId || "" },
           timeout: 10000,
           validateStatus: () => true
         }
@@ -1272,6 +1294,10 @@
       const secExtensions = req.headers["sec-websocket-extensions"];
       const secProtocol = req.headers["sec-websocket-protocol"];
       const origin = req.headers.origin;
+      const requestIdHeader = req.headers["x-request-id"];
+      const requestId = typeof requestIdHeader === "string" && requestIdHeader.trim()
+        ? requestIdHeader.trim()
+        : crypto.randomUUID();
 
       forwardHeader("Host", atcUrl.host || `${host}:${port}`);
       forwardHeader("Connection", "Upgrade");
@@ -1281,6 +1307,7 @@
       forwardHeader("Sec-WebSocket-Extensions", secExtensions);
       forwardHeader("Sec-WebSocket-Protocol", secProtocol);
       forwardHeader("Origin", origin);
+      forwardHeader("X-Request-ID", requestId);
       if (ATC_WS_TOKEN) {
         forwardHeader("Authorization", `Bearer ${ATC_WS_TOKEN}`);
       }
