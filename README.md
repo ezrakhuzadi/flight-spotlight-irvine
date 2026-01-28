@@ -2,9 +2,13 @@
 
 Web-based mission control interface for the ATC-Drone UTM (Unmanned Traffic Management) system. Provides real-time 3D visualization of drone fleet operations, conflict detection, and airspace management.
 
+## About
+
+The Control Center is the operator-facing UI for the ATC stack. It connects to the `atc-drone` backend over HTTP/WebSocket, visualizes live traffic and conflicts, and provides tools for planning, geofencing, and fleet management. Google Photorealistic 3D Tiles are supported when a Cesium Ion token is configured; otherwise the map falls back to free imagery and basic terrain.
+
 ## Features
 
-- **Live 3D Map** - CesiumJS with Google Photorealistic 3D tiles for real-time drone tracking
+- **Live 3D Map** - CesiumJS with optional Google Photorealistic 3D tiles for real-time drone tracking
 - **Fleet Management** - Register, monitor, and command drones (HOLD, RESUME, LAND)
 - **Conflict Detection** - Visual alerts when drones violate separation minimums
 - **Geofencing** - Define and visualize no-fly zones, restricted areas, and temporary restrictions

@@ -582,6 +582,16 @@
             margin-bottom: 10px;
         }
 
+        .route-input-row.dragging {
+            opacity: 0.6;
+        }
+
+        .route-input-row.drag-over {
+            outline: 1px dashed rgba(34, 211, 238, 0.6);
+            background: rgba(34, 211, 238, 0.05);
+            border-radius: 10px;
+        }
+
         .route-input-row:last-child {
             margin-bottom: 0;
         }
@@ -617,6 +627,29 @@
 
         .route-marker.end span {
             transform: rotate(45deg);
+        }
+
+        .route-drag-handle {
+            width: 20px;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: grab;
+            font-size: 16px;
+            user-select: none;
+        }
+
+        .route-drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .route-drag-handle:focus-visible {
+            outline: 2px solid var(--accent-cyan);
+            border-radius: 6px;
         }
 
         .route-input {
@@ -844,6 +877,7 @@
                         <!-- Start Location -->
                         <div class="route-input-row" data-index="0">
                             <span class="route-marker start">A</span>
+                            <button type="button" class="route-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
                             <div class="route-input-wrapper">
                                 <input type="text" class="route-input" placeholder="Start: Address or coordinates"
                                     data-type="start" autocomplete="off">
@@ -855,6 +889,7 @@
                         <!-- Destination -->
                         <div class="route-input-row" data-index="1">
                             <span class="route-marker end"><span>B</span></span>
+                            <button type="button" class="route-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
                             <div class="route-input-wrapper">
                                 <input type="text" class="route-input" placeholder="Destination: Address or coordinates"
                                     data-type="end" autocomplete="off">
@@ -976,19 +1011,6 @@
                     <span class="step-num">3</span>
                     <p>If approved, click "Submit Flight Plan" to send to ATC</p>
                 </div>
-            </div>
-
-            <!-- Quick Location Buttons -->
-            <div class="quick-locations">
-                <button class="quick-loc-btn" onclick="FlightPlanner.flyTo(33.6846, -117.8265, 1500)">
-                    UCI Campus
-                </button>
-                <button class="quick-loc-btn" onclick="FlightPlanner.flyTo(33.6752, -117.8675, 1500)">
-                    John Wayne Airport
-                </button>
-                <button class="quick-loc-btn" onclick="FlightPlanner.flyTo(33.7489, -117.8730, 1500)">
-                    Irvine Spectrum
-                </button>
             </div>
 
             <div class="orbit-axis">
@@ -1512,6 +1534,7 @@
         let activeInput = null;
         let autocompleteService = null;
         let suppressWaypointSync = false;
+        let draggingRow = null;
 
         /**
          * AutocompleteService - Handles Cesium Ion geocoding with debounce
@@ -1827,6 +1850,7 @@
             stopRow.className = 'route-input-row';
             stopRow.innerHTML = `
                 <span class="route-marker stop">${stopCounter}</span>
+                <button type="button" class="route-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
                 <div class="route-input-wrapper">
                     <input type="text" class="route-input" placeholder="Stop: Address or coordinates" data-type="stop" autocomplete="off">
                     <div class="autocomplete-dropdown"></div>
@@ -1838,6 +1862,7 @@
 
             const newInput = stopRow.querySelector('.route-input');
             setupInputAutocomplete(newInput);
+            setupRouteRowDrag(stopRow);
             if (focus) {
                 newInput.focus();
             }
@@ -1905,6 +1930,88 @@
                     input.dataset.type = 'stop';
                 }
             });
+        }
+
+        function setupRouteRowDrag(row) {
+            if (!row || row.dataset.dragInit === 'true') return;
+            row.dataset.dragInit = 'true';
+            row.setAttribute('draggable', 'true');
+
+            row.addEventListener('dragstart', (event) => {
+                const handle = event.target?.closest?.('.route-drag-handle');
+                if (!handle) {
+                    event.preventDefault();
+                    return;
+                }
+                draggingRow = row;
+                row.classList.add('dragging');
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', 'route');
+            });
+
+            row.addEventListener('dragover', (event) => {
+                if (!draggingRow || draggingRow === row) return;
+                event.preventDefault();
+                row.classList.add('drag-over');
+                const rect = row.getBoundingClientRect();
+                const before = event.clientY < rect.top + rect.height / 2;
+                const parent = row.parentNode;
+                if (before) {
+                    parent.insertBefore(draggingRow, row);
+                } else {
+                    parent.insertBefore(draggingRow, row.nextSibling);
+                }
+            });
+
+            row.addEventListener('dragleave', () => {
+                row.classList.remove('drag-over');
+            });
+
+            row.addEventListener('drop', (event) => {
+                if (!draggingRow) return;
+                event.preventDefault();
+                row.classList.remove('drag-over');
+                finalizeRouteReorder();
+            });
+
+            row.addEventListener('dragend', () => {
+                row.classList.remove('dragging');
+                document.querySelectorAll('.route-input-row.drag-over').forEach((el) => {
+                    el.classList.remove('drag-over');
+                });
+                draggingRow = null;
+            });
+        }
+
+        function setupRouteDragContainer() {
+            const routeInputs = document.getElementById('routeInputs');
+            if (!routeInputs) return;
+
+            routeInputs.addEventListener('dragover', (event) => {
+                if (!draggingRow) return;
+                event.preventDefault();
+                const overRow = event.target?.closest?.('.route-input-row');
+                if (!overRow) {
+                    routeInputs.appendChild(draggingRow);
+                }
+            });
+
+            routeInputs.addEventListener('drop', (event) => {
+                if (!draggingRow) return;
+                event.preventDefault();
+                finalizeRouteReorder();
+            });
+        }
+
+        function finalizeRouteReorder() {
+            updateMarkerLabels();
+            updateClearButtonState();
+            void resyncWaypointsFromInputs();
+        }
+
+        function initRouteReorderUI() {
+            document.querySelectorAll('.route-input-row').forEach(setupRouteRowDrag);
+            setupRouteDragContainer();
         }
 
         function clearRouteInput(input) {
@@ -2097,6 +2204,7 @@
                 // Initialize autocomplete service with Cesium Ion
                 autocompleteService = new AutocompleteService(FlightPlanner.getViewer());
                 initializeAutocomplete();
+                initRouteReorderUI();
                 console.log('[Planner] Autocomplete service initialized');
 
                 // Fly to Irvine area
