@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SDK Documentation - Control Center</title>
+    <title>Drone Integration - Control Center</title>
     <link rel="stylesheet" href="/assets/css/mission-control.css">
     <style>
         body {
@@ -239,7 +239,7 @@
     <header class="docs-header">
         <div class="docs-brand">
             <a href="/control">Control Center</a>
-            <span class="docs-title">SDK Documentation</span>
+            <span class="docs-title">Drone Integration</span>
         </div>
         <div>
             <% if (user) { %>
@@ -260,12 +260,14 @@
                 <div class="docs-nav-title">Getting Started</div>
                 <a href="#overview" class="docs-nav-link active">Overview</a>
                 <a href="#quickstart" class="docs-nav-link">Quick Start</a>
-                <a href="#installation" class="docs-nav-link">Installation</a>
+                <a href="#installation" class="docs-nav-link">MAVLink Gateway</a>
+                <a href="#mavlink-commands" class="docs-nav-link">Command Mapping</a>
+                <a href="#mavlink-troubleshooting" class="docs-nav-link">Troubleshooting</a>
                 <a href="#auth" class="docs-nav-link">Authentication</a>
             </div>
 
             <div class="docs-nav-section">
-                <div class="docs-nav-title">SDK Reference</div>
+                <div class="docs-nav-title">Rust SDK (Advanced)</div>
                 <a href="#client" class="docs-nav-link">AtcClient</a>
                 <a href="#sdk-registration" class="docs-nav-link">Registration</a>
                 <a href="#sdk-telemetry" class="docs-nav-link">Telemetry</a>
@@ -305,10 +307,10 @@
         </nav>
 
         <main class="docs-content">
-            <h1 id="overview">ATC-Drone SDK & API</h1>
-            <p>Integrate drones with the ATC server for registration, telemetry, conflict detection, routing, and
-                command delivery. The SDK is for drone clients; the API reference below is complete for Control Center
-                and service integrations.</p>
+            <h1 id="overview">Drone Integration</h1>
+            <p>Recommended integration for real drones is the <strong>MAVLink Gateway</strong> (autopilot ↔ ATC bridge).
+                Use the Rust SDK only if you’re writing a custom drone client or simulator that talks directly to the
+                ATC backend.</p>
 
             <div class="callout info">
                 <strong>Base URLs:</strong><br>
@@ -325,9 +327,49 @@
             </div>
 
             <h2 id="quickstart">Quick Start</h2>
-            <p>Register a drone and stream telemetry in a few minutes.</p>
+            <p>Fastest path for a real autopilot (ArduPilot/PX4) is the <code class="code-inline">mavlink-gateway</code>.
+                Use the Rust SDK only for custom drone clients/sims.</p>
 
-            <h3>1. Add the SDK to your project</h3>
+            <h3 id="mavlink-quickstart">MAVLink Gateway (recommended)</h3>
+            <p>The gateway runs on a companion computer (Raspberry Pi/Jetson) or a SITL/ground machine. It forwards
+                MAVLink telemetry to ATC, and applies ATC commands as best-effort autopilot mode changes + position
+                targets.</p>
+
+            <h4>Option A: Docker Compose (atc-stack)</h4>
+            <div class="code-block">
+                <pre>cd atc-stack
+
+# Start the stack
+docker compose up -d
+
+# Start the MAVLink gateway
+docker compose --profile mavlink up -d --build mavlink-gateway</pre>
+            </div>
+
+            <h4>Option B: Host run (common on Raspberry Pi)</h4>
+            <div class="code-block">
+                <pre>cd atc-stack/mavlink-gateway
+python3 -m pip install -r requirements.txt
+
+export ATC_SERVER_URL="http://your-atc-host:3000"
+export ATC_DRONE_ID="DRONE0001"
+export ATC_REGISTRATION_TOKEN="change-me-registration-token"
+export MAVLINK_ENDPOINT="serial:/dev/ttyAMA0:57600"   # or udp:0.0.0.0:14550
+
+python3 main.py</pre>
+            </div>
+
+            <div class="callout warning">
+                <strong>Autopilot requirements:</strong> your autopilot must support a guided/offboard mode that accepts
+                position targets (typically <code class="code-inline">GUIDED</code> on ArduPilot, <code
+                    class="code-inline">OFFBOARD</code> on PX4). The gateway does not “low-level fly” the drone; it only
+                sets targets and modes.
+            </div>
+
+            <h3 id="rust-quickstart">Rust SDK (advanced)</h3>
+            <p>Use this if you are writing a drone client/simulator that talks directly to the ATC backend (HTTP/WS).</p>
+
+            <h4>1. Add the SDK to your project</h4>
             <div class="code-block">
                 <pre># Cargo.toml
 [dependencies]
@@ -337,7 +379,7 @@ tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"</pre>
             </div>
 
-            <h3>2. Register and send telemetry</h3>
+            <h4>2. Register and send telemetry</h4>
             <div class="code-block">
                 <pre>use atc_sdk::AtcClient;
 use std::time::Duration;
@@ -365,21 +407,74 @@ async fn main() -> anyhow::Result<()> {
 }</pre>
             </div>
 
-            <h2 id="installation">Installation</h2>
+            <h2 id="installation">MAVLink Gateway</h2>
+            <p>If you have a MAVLink autopilot (ArduPilot/PX4), this is the recommended integration. Run the gateway on
+                a companion computer (Raspberry Pi/Jetson) connected to the autopilot via serial/UDP.</p>
 
             <h3>Prerequisites</h3>
             <ul>
-                <li>Rust 1.70+ (SDK and server)</li>
-                <li>ATC server running on the target host/port</li>
-                <li>Network access between drones and server</li>
+                <li>MAVLink autopilot reachable via serial or UDP</li>
+                <li>Companion computer with network access to the ATC backend</li>
+                <li>Auth via <code class="code-inline">ATC_SESSION_TOKEN</code> or
+                    <code class="code-inline">ATC_REGISTRATION_TOKEN</code></li>
             </ul>
 
-            <h3>Clone and run the server</h3>
+            <h3>Configuration</h3>
             <div class="code-block">
-                <pre>git clone https://github.com/your-org/atc-drone.git
-cd atc-drone
-cargo run -p atc-server --release</pre>
+                <pre># Required
+ATC_SERVER_URL=http://your-atc-host:3000
+ATC_DRONE_ID=DRONE0001
+
+# Auth (choose one)
+# ATC_SESSION_TOKEN=...
+ATC_REGISTRATION_TOKEN=change-me-registration-token
+
+# MAVLink
+MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600   # or udp:0.0.0.0:14550
+
+# Optional
+ATC_OWNER_ID=guest
+ATC_TELEMETRY_HZ=5
+ATC_COMMAND_POLL_HZ=2
+ATC_TARGET_REACHED_M=12</pre>
             </div>
+
+            <h3>Run</h3>
+            <div class="code-block">
+                <pre>cd atc-stack/mavlink-gateway
+python3 -m pip install -r requirements.txt
+
+export ATC_SERVER_URL="http://your-atc-host:3000"
+export ATC_DRONE_ID="DRONE0001"
+export ATC_REGISTRATION_TOKEN="change-me-registration-token"
+export MAVLINK_ENDPOINT="serial:/dev/ttyAMA0:57600"
+
+python3 main.py</pre>
+            </div>
+
+            <div class="callout info">
+                <strong>Compose profile:</strong> if you run everything via <code
+                    class="code-inline">atc-stack</code>, the gateway is available behind the <code
+                    class="code-inline">mavlink</code> profile:
+                <br><code class="code-inline">docker compose --profile mavlink up -d --build mavlink-gateway</code>
+            </div>
+
+            <h2 id="mavlink-commands">Command Mapping</h2>
+            <p>ATC commands are translated into best-effort autopilot actions:</p>
+            <ul>
+                <li><code class="code-inline">HOLD</code> → switch to a hold-like mode (tries LOITER/HOLD/POSHOLD/BRAKE)</li>
+                <li><code class="code-inline">RESUME</code> → return to previous mode or continue guided target</li>
+                <li><code class="code-inline">ALTITUDE_CHANGE</code> → set a guided target at current lat/lon with requested altitude</li>
+                <li><code class="code-inline">REROUTE</code> → switch to GUIDED/OFFBOARD and step through waypoint targets</li>
+            </ul>
+            <p>Targets are sent using MAVLink <code class="code-inline">SET_POSITION_TARGET_GLOBAL_INT</code> (position + altitude).</p>
+
+            <h2 id="mavlink-troubleshooting">Troubleshooting</h2>
+            <ul>
+                <li><strong>No MAVLink heartbeat:</strong> verify <code class="code-inline">MAVLINK_ENDPOINT</code>, serial permissions, and baud rate.</li>
+                <li><strong>Telemetry but no control:</strong> autopilot may not support GUIDED/OFFBOARD or requires extra config to accept setpoints.</li>
+                <li><strong>Auth errors:</strong> verify <code class="code-inline">ATC_REGISTRATION_TOKEN</code> (or session token) matches the backend.</li>
+            </ul>
 
             <h2 id="auth">Authentication</h2>
             <p>ATC uses short-lived tokens for drones and optional shared tokens for registration and WebSockets.</p>
