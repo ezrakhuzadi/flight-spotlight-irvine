@@ -108,6 +108,7 @@ function initUserStore(options = {}) {
   const statements = {
     getById: db.prepare("SELECT * FROM users WHERE id = ?"),
     getByEmail: db.prepare("SELECT * FROM users WHERE email = ?"),
+    countUsers: db.prepare("SELECT COUNT(1) AS count FROM users"),
     insert: db.prepare(`
       INSERT INTO users (
         id,
@@ -160,6 +161,12 @@ function initUserStore(options = {}) {
 
   function getUserByEmail(email) {
     return normalizeUser(statements.getByEmail.get(email));
+  }
+
+  function countUsers() {
+    const row = statements.countUsers.get();
+    const count = row?.count;
+    return typeof count === "number" ? count : Number(count || 0) || 0;
   }
 
   function createUser({ id, name, email, passwordHash, passwordAlgo, role }) {
@@ -233,6 +240,7 @@ function initUserStore(options = {}) {
     dbPath,
     getUserById,
     getUserByEmail,
+    countUsers,
     createUser,
     updateProfile,
     updatePassword,

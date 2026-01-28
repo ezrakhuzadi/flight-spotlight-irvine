@@ -49,6 +49,10 @@
   const ROUTE_ENGINE_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_ENGINE_CONFIG, "ATC_ROUTE_ENGINE_CONFIG");
   const ROUTE_PLANNER_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_PLANNER_CONFIG, "ATC_ROUTE_PLANNER_CONFIG");
 
+  if (IS_PRODUCTION && ALLOW_DEFAULT_USERS) {
+    throw new Error("[AUTH] ATC_ALLOW_DEFAULT_USERS=1 is not allowed in production.");
+  }
+
   let atcCaCert = null;
   if (ATC_SERVER_CA_CERT_PATH) {
     try {
@@ -321,6 +325,65 @@
     });
   }, COMPLIANCE_LIMITS_REFRESH_MS).unref();
 
+  function isKnownPlaceholderPassword(password) {
+    return password === "admin123" || password === "guest123";
+  }
+
+  function passwordMatches(user, password) {
+    if (!user || !password) return false;
+    const algo = user.passwordAlgo || "sha256";
+    if (algo === PASSWORD_ALGO) {
+      return bcrypt.compareSync(password, user.passwordHash);
+    }
+    const legacyHash = hashLegacyPassword(password);
+    return legacyHash === user.passwordHash;
+  }
+
+  function enforceNoPlaceholderPassword(label, password) {
+    if (!password) return;
+    if (!isKnownPlaceholderPassword(password)) return;
+    const message = `[AUTH] ${label} password matches a known placeholder; refusing to start in production.`;
+    if (IS_PRODUCTION) {
+      throw new Error(message);
+    }
+    console.warn(message);
+  }
+
+  const bootstrapAdminEmail = cleanEnv(process.env.ATC_BOOTSTRAP_ADMIN_EMAIL);
+  const bootstrapAdminPassword = cleanEnv(process.env.ATC_BOOTSTRAP_ADMIN_PASSWORD);
+  enforceNoPlaceholderPassword("ATC_BOOTSTRAP_ADMIN", bootstrapAdminPassword);
+
+  const bootstrapGuestEmail = cleanEnv(process.env.ATC_BOOTSTRAP_GUEST_EMAIL);
+  const bootstrapGuestPassword = cleanEnv(process.env.ATC_BOOTSTRAP_GUEST_PASSWORD);
+  enforceNoPlaceholderPassword("ATC_BOOTSTRAP_GUEST", bootstrapGuestPassword);
+
+  const existingUserCount = userStore.countUsers();
+  if (IS_PRODUCTION && existingUserCount === 0) {
+    if (!(bootstrapAdminEmail && bootstrapAdminPassword)) {
+      throw new Error(
+        "[AUTH] No users exist. In production, you must set ATC_BOOTSTRAP_ADMIN_EMAIL and ATC_BOOTSTRAP_ADMIN_PASSWORD before startup."
+      );
+    }
+  }
+
+  const existingAdmin = userStore.getUserById("admin");
+  if (existingAdmin && passwordMatches(existingAdmin, "admin123")) {
+    const message = "[AUTH] User 'admin' still has a known default password; refusing to start in production.";
+    if (IS_PRODUCTION) {
+      throw new Error(message);
+    }
+    console.warn(message);
+  }
+
+  const existingGuest = userStore.getUserById("guest");
+  if (existingGuest && passwordMatches(existingGuest, "guest123")) {
+    const message = "[AUTH] User 'guest' still has a known default password; refusing to start in production.";
+    if (IS_PRODUCTION) {
+      throw new Error(message);
+    }
+    console.warn(message);
+  }
+
   const seedUsers = [];
   const adminSeed = buildSeedUser("ATC_BOOTSTRAP_ADMIN", {
     id: "admin",
@@ -340,7 +403,7 @@
   });
   if (guestSeed) seedUsers.push(guestSeed);
 
-  if (seedUsers.length === 0 && !ALLOW_DEFAULT_USERS) {
+  if (existingUserCount === 0 && seedUsers.length === 0 && !ALLOW_DEFAULT_USERS) {
     console.warn("[AUTH] No bootstrap users configured; set ATC_BOOTSTRAP_ADMIN_EMAIL and ATC_BOOTSTRAP_ADMIN_PASSWORD.");
   } else if (ALLOW_DEFAULT_USERS) {
     console.warn("[AUTH] ATC_ALLOW_DEFAULT_USERS enabled; default accounts are seeded for dev only.");
@@ -573,7 +636,7 @@
     if (req.session.user) {
       return res.redirect('/control');
     }
-    const guestLoginEnabled = Boolean(userStore.getUserById("guest"));
+    const guestLoginEnabled = !IS_PRODUCTION && Boolean(userStore.getUserById("guest"));
     res.render('login', { error: null, guestLoginEnabled });
   });
 
@@ -598,27 +661,29 @@
   });
 
   // Guest login (one-click)
-  app.post('/login/guest', (req, res) => {
-    const guest = userStore.getUserById('guest');
-    if (!guest) {
-      console.warn("[AUTH] Guest login requested but no guest user is configured.");
-      return res.status(400).render("login", {
-        error:
-          "Guest login is not configured. Create a guest user or set ATC_ALLOW_DEFAULT_USERS=1 (dev only), then restart.",
-        guestLoginEnabled: false
-      });
-    }
-    req.session.user = {
-      id: guest.id,
-      name: guest.name,
-      email: guest.email,
-      role: guest.role,
-      createdAt: guest.createdAt
-    };
-    userStore.touchLogin(guest.id);
-    console.log('[AUTH] Guest user logged in');
-    res.redirect('/control');
-  });
+  if (!IS_PRODUCTION) {
+    app.post('/login/guest', (req, res) => {
+      const guest = userStore.getUserById('guest');
+      if (!guest) {
+        console.warn("[AUTH] Guest login requested but no guest user is configured.");
+        return res.status(400).render("login", {
+          error:
+            "Guest login is not configured. Create a guest user or set ATC_ALLOW_DEFAULT_USERS=1 (dev only), then restart.",
+          guestLoginEnabled: false
+        });
+      }
+      req.session.user = {
+        id: guest.id,
+        name: guest.name,
+        email: guest.email,
+        role: guest.role,
+        createdAt: guest.createdAt
+      };
+      userStore.touchLogin(guest.id);
+      console.log('[AUTH] Guest user logged in');
+      res.redirect('/control');
+    });
+  }
 
   // Signup page
   app.get('/signup', (req, res) => {
