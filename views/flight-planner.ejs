@@ -31,7 +31,7 @@
 
             const declarationUrl = '/api/blender/flight-declarations';
             const atcBase = window.__ATC_API_BASE__ || '/api/atc';
-            const complianceUrl = atcBase.replace(/\/$/, '') + '/v1/compliance/evaluate';
+            const complianceUrl = atcBase.replace(/\\/$/, '') + '/v1/compliance/evaluate';
             const PREFILL_KEY = 'plannerPrefill';
 
             const COMPLIANCE_LIMITS = (() => {
@@ -209,7 +209,10 @@
                 }
                 const response = await fetch(complianceUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+                    },
                     credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
@@ -293,7 +296,10 @@
             async function submitDeclaration(payload) {
                 const response = await fetch(declarationUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+                    },
                     credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });

@@ -18,6 +18,11 @@
     <link rel="stylesheet" href="/assets/css/camera-controls.css">
 
     <meta name="csrf-token" content="<%= csrfToken || '' %>">
+
+    <script nonce="<%= cspNonce %>">
+        // Required for Cesium to locate Workers/Assets when loaded from /assets/Build/Cesium/.
+        window.CESIUM_BASE_URL = "/assets/Build/Cesium/";
+    </script>
     
     <%- typeof head !== 'undefined' ? head : '' %>
 </head>
@@ -46,6 +51,7 @@
         window.__ROUTE_PLANNER_CONFIG__ = <%- JSON.stringify(typeof routePlannerConfig !== 'undefined' ? routePlannerConfig : {}) %>;
         window.__CESIUM_CONFIG__ = {
             ionToken: <%- JSON.stringify(cesiumIonToken || '') %>,
+            ionBaseImageryAssetId: <%- JSON.stringify(ionBaseImageryAssetId || null) %>,
             google3dTilesAssetId: <%- JSON.stringify(google3dTilesAssetId || null) %>,
             osmBuildingsAssetId: <%- JSON.stringify(osmBuildingsAssetId || null) %>
         };
@@ -63,6 +69,7 @@
     <!-- Core Scripts -->
     <script src="/assets/js/camera-controls.js"></script>
     <script src="/assets/js/api-client.js"></script>
+    <script src="/assets/js/cesium-ion.js"></script>
     <%- typeof scripts !== 'undefined' ? scripts : '' %>
 </body>
 </html>

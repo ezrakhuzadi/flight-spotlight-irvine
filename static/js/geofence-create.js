@@ -10,6 +10,7 @@
 
     const CONFIG = {
         CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        ION_BASE_IMAGERY_ASSET_ID: Number(CesiumConfig.ionBaseImageryAssetId) || 0,
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.66, lon: -117.84, height: 6000 }
     };
@@ -25,13 +26,36 @@
         return Math.min(Math.max(value, min), max);
     }
 
-    function initViewer() {
-        Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+    async function initViewer() {
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        }
 
-	        viewer = new Cesium.Viewer('geofenceMap', {
-	            globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
-	            skyAtmosphere: new Cesium.SkyAtmosphere(),
-	            geocoder: false,
+        const esriImagery = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
+        esriImagery.errorEvent.addEventListener((error) => {
+            console.warn('[Geofence Create] Esri imagery error:', error);
+        });
+
+        let terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            try {
+                terrainProvider = await Cesium.createWorldTerrainAsync();
+                console.log('[Geofence Create] Cesium World Terrain loaded');
+            } catch (error) {
+                console.warn('[Geofence Create] Failed to load World Terrain; using ellipsoid terrain:', error);
+                terrainProvider = new Cesium.EllipsoidTerrainProvider();
+            }
+        }
+
+        viewer = new Cesium.Viewer('geofenceMap', {
+            imageryProvider: esriImagery,
+            terrainProvider,
+            globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
+            skyAtmosphere: new Cesium.SkyAtmosphere(),
+            geocoder: false,
             homeButton: false,
             baseLayerPicker: false,
             infoBox: false,
@@ -42,18 +66,32 @@
             timeline: false,
             navigationHelpButton: false,
             shadows: false
-	        });
+        });
 
-	        viewer.scene.globe.enableLighting = true;
+        viewer.scene.globe.enableLighting = true;
 
-	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
-	            window.ATCCameraControls.attach(viewer);
-	        }
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.ION_BASE_IMAGERY_ASSET_ID) {
+            try {
+                const ionProvider = await Cesium.IonImageryProvider.fromAssetId(CONFIG.ION_BASE_IMAGERY_ASSET_ID);
+                ionProvider.errorEvent.addEventListener((error) => {
+                    console.warn('[Geofence Create] Ion imagery error:', error);
+                });
+                const ionLayer = viewer.imageryLayers.addImageryProvider(ionProvider);
+                viewer.imageryLayers.raiseToTop(ionLayer);
+                console.log(`[Geofence Create] Cesium Ion imagery loaded (asset ${CONFIG.ION_BASE_IMAGERY_ASSET_ID})`);
+            } catch (error) {
+                console.warn('[Geofence Create] Failed to load Ion imagery; keeping Esri imagery:', error);
+            }
+        }
 
-	        viewer.camera.flyTo({
-	            destination: Cesium.Cartesian3.fromDegrees(
-	                CONFIG.DEFAULT_VIEW.lon,
-	                CONFIG.DEFAULT_VIEW.lat,
+        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+            window.ATCCameraControls.attach(viewer);
+        }
+
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(
+                CONFIG.DEFAULT_VIEW.lon,
+                CONFIG.DEFAULT_VIEW.lat,
                 CONFIG.DEFAULT_VIEW.height
             ),
             orientation: {
@@ -63,9 +101,17 @@
             }
         });
 
-        Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID)
-            .then((tileset) => viewer.scene.primitives.add(tileset))
-            .catch((error) => console.error('[Geofence Create] Tileset load failed:', error));
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.GOOGLE_3D_TILES_ASSET_ID) {
+            Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID, {
+                showOutline: false,
+                enableShowOutline: false
+            })
+                .then((tileset) => {
+                    tileset.showOutline = false;
+                    viewer.scene.primitives.add(tileset);
+                })
+                .catch((error) => console.error('[Geofence Create] Tileset load failed:', error));
+        }
     }
 
     function setDrawMode(active) {
@@ -235,7 +281,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        initViewer();
+        initViewer().catch((error) => {
+            console.error('[Geofence Create] Viewer init failed:', error);
+        });
         bindUI();
     });
 })();

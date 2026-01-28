@@ -14,6 +14,7 @@
 
     const CONFIG = {
         CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        ION_BASE_IMAGERY_ASSET_ID: Number(CesiumConfig.ionBaseImageryAssetId) || 0,
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 5000 },
         ATC_API_BASE: window.__ATC_API_BASE__ || '/api/atc',
@@ -51,9 +52,18 @@
     async function initViewer() {
         console.log('[RemoteID] Initializing Cesium viewer...');
 
-        Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        }
+
+        const imageryProvider = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
 
         viewer = new Cesium.Viewer('cesiumContainer', {
+            imageryProvider,
+            terrainProvider: new Cesium.EllipsoidTerrainProvider(),
             globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
             skyAtmosphere: new Cesium.SkyAtmosphere(),
             geocoder: false,
@@ -69,42 +79,71 @@
             shadows: false
         });
 
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            if (CONFIG.ION_BASE_IMAGERY_ASSET_ID) {
+                try {
+                    const ionProvider = await Cesium.IonImageryProvider.fromAssetId(CONFIG.ION_BASE_IMAGERY_ASSET_ID);
+                    ionProvider.errorEvent.addEventListener((error) => {
+                        console.warn('[RemoteID] Ion imagery error:', error);
+                    });
+                    const ionLayer = viewer.imageryLayers.addImageryProvider(ionProvider);
+                    viewer.imageryLayers.raiseToTop(ionLayer);
+                    console.log(`[RemoteID] Cesium Ion imagery loaded (asset ${CONFIG.ION_BASE_IMAGERY_ASSET_ID})`);
+                } catch (error) {
+                    console.warn('[RemoteID] Failed to load Cesium Ion imagery; keeping Esri imagery:', error);
+                }
+            }
+
+            try {
+                viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
+                console.log('[RemoteID] Cesium World Terrain loaded');
+            } catch (error) {
+                console.warn('[RemoteID] Failed to load Cesium World Terrain; using ellipsoid terrain:', error);
+            }
+        }
+
         viewer.scene.globe.enableLighting = true;
         viewer.clock.currentTime = Cesium.JulianDate.now();
         viewer.clock.shouldAnimate = true;
 
-        // Load Google 3D Tiles
-        try {
-            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
-            viewer.scene.primitives.add(tileset);
-            console.log('[RemoteID] Google 3D Tiles loaded');
-        } catch (e) {
-            console.error('[RemoteID] Failed to load 3D tiles:', e);
+        // Load Google 3D Tiles (optional; requires Cesium Ion token + asset ID).
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.GOOGLE_3D_TILES_ASSET_ID) {
+            try {
+                const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID, {
+                    showOutline: false,
+                    enableShowOutline: false
+                });
+                tileset.showOutline = false;
+                viewer.scene.primitives.add(tileset);
+                console.log('[RemoteID] Google 3D Tiles loaded');
+            } catch (e) {
+                console.error('[RemoteID] Failed to load 3D tiles:', e);
+            }
         }
 
-	        // Set initial view
-	        viewer.camera.flyTo({
-	            destination: Cesium.Cartesian3.fromDegrees(
-	                CONFIG.DEFAULT_VIEW.lon,
+        // Set initial view
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(
+                CONFIG.DEFAULT_VIEW.lon,
                 CONFIG.DEFAULT_VIEW.lat,
                 CONFIG.DEFAULT_VIEW.height
             ),
             orientation: {
                 heading: Cesium.Math.toRadians(0),
                 pitch: Cesium.Math.toRadians(-45),
-	                roll: 0
-	            }
-	        });
+                roll: 0
+            }
+        });
 
-	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
-	            window.ATCCameraControls.attach(viewer);
-	        }
+        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+            window.ATCCameraControls.attach(viewer);
+        }
 
-	        // Start data refresh
-	        startDataRefresh();
+        // Start data refresh
+        startDataRefresh();
 
-	        console.log('[RemoteID] Viewer initialized');
-	    }
+        console.log('[RemoteID] Viewer initialized');
+    }
 
     // ========================================================================
     // Data Fetching
@@ -400,10 +439,19 @@
             const viewBounds = normalizeViewBounds(getViewBounds());
             const now = Date.now();
 
+            const role = window.APP_USER?.role;
+            const canUpdateView = role === 'authority' || role === 'admin';
+
             if (viewChanged(lastViewBounds, viewBounds) ||
                 now - lastViewUpdateAt > CONFIG.VIEW_UPDATE_TTL_MS) {
-                await updateRidView(viewBounds);
-                lastViewUpdateAt = now;
+                if (canUpdateView) {
+                    try {
+                        await updateRidView(viewBounds);
+                        lastViewUpdateAt = now;
+                    } catch (error) {
+                        console.warn('[RemoteID] RID view update skipped:', error);
+                    }
+                }
                 lastViewBounds = viewBounds;
                 lastViewParam = toViewParam(viewBounds);
             }

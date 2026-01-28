@@ -61,7 +61,7 @@ router.get('/geofences', (req, res) => {
     res.render('geofences', { user: req.session.user });
 });
 
-router.get('/geofences/create', requireRole('authority'), (req, res) => {
+router.get('/geofences/create', requireRole(['authority', 'admin']), (req, res) => {
     res.render('geofence-create', { user: req.session.user });
 });
 

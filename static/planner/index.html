@@ -11,10 +11,7 @@
         content="Flight planning and route validation for drone operations. Calculates 3D corridors with FAA Part 107 compliance.">
 
     <!-- CesiumJS (local build for offline demos) -->
-    <script>
-        // Required for Cesium to find worker scripts/assets when not using a bundler.
-        window.CESIUM_BASE_URL = '/assets/Build/Cesium/';
-    </script>
+    <script src="./cesium-base-url.js"></script>
     <script src="/assets/Build/Cesium/Cesium.js"></script>
     <link href="/assets/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 
@@ -1045,6 +1042,22 @@
             return '';
         })();
 
+        const ION_BASE_IMAGERY_ASSET_ID = (() => {
+            const localConfig = window.__CESIUM_CONFIG__ || {};
+            if (localConfig.ionBaseImageryAssetId) {
+                return Number(localConfig.ionBaseImageryAssetId) || 0;
+            }
+            try {
+                const parentConfig = window.parent && window.parent !== window ? window.parent.__CESIUM_CONFIG__ : null;
+                if (parentConfig && parentConfig.ionBaseImageryAssetId) {
+                    return Number(parentConfig.ionBaseImageryAssetId) || 0;
+                }
+            } catch (err) {
+                // Ignore cross-origin access errors.
+            }
+            return 0;
+        })();
+
         // ========================================================================
         // State
         // ========================================================================
@@ -1794,7 +1807,19 @@
             updateClearButtonState();
         }
 
-        function addStopInput() {
+        function indexToAlphaLabel(index) {
+            let n = Math.max(1, index);
+            let label = '';
+            while (n > 0) {
+                const rem = (n - 1) % 26;
+                label = String.fromCharCode(65 + rem) + label;
+                n = Math.floor((n - 1) / 26);
+            }
+            return label;
+        }
+
+        function addStopInput(options = {}) {
+            const { focus = true } = options;
             stopCounter++;
             const routeInputs = document.getElementById('routeInputs');
             const endRow = routeInputs.querySelector('[data-type="end"]')?.closest('.route-input-row');
@@ -1813,8 +1838,11 @@
 
             const newInput = stopRow.querySelector('.route-input');
             setupInputAutocomplete(newInput);
-            newInput.focus();
+            if (focus) {
+                newInput.focus();
+            }
             updateMarkerLabels();
+            return stopRow;
         }
 
         function removeStopInput(btn) {
@@ -1862,10 +1890,75 @@
             rows.forEach((row, idx) => {
                 const marker = row.querySelector('.route-marker');
                 const input = row.querySelector('.route-input');
-                if (idx === 0) { marker.className = 'route-marker start'; marker.innerHTML = 'A'; input.dataset.type = 'start'; }
-                else if (idx === rows.length - 1) { marker.className = 'route-marker end'; marker.innerHTML = '<span>B</span>'; input.dataset.type = 'end'; }
-                else { marker.className = 'route-marker stop'; marker.innerHTML = idx.toString(); input.dataset.type = 'stop'; }
+                const label = indexToAlphaLabel(idx + 1);
+                if (idx === 0) {
+                    marker.className = 'route-marker start';
+                    marker.innerHTML = label;
+                    input.dataset.type = 'start';
+                } else if (idx === rows.length - 1) {
+                    marker.className = 'route-marker end';
+                    marker.innerHTML = `<span>${label}</span>`;
+                    input.dataset.type = 'end';
+                } else {
+                    marker.className = 'route-marker stop';
+                    marker.innerHTML = label;
+                    input.dataset.type = 'stop';
+                }
             });
+        }
+
+        function clearRouteInput(input) {
+            input.value = '';
+            input.classList.remove('resolved', 'error');
+            routeInputData.delete(input);
+        }
+
+        function setRouteInputFromWaypoint(input, wp) {
+            const coordStr = `${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}`;
+            input.value = coordStr;
+            input.classList.add('resolved');
+            input.classList.remove('error');
+            routeInputData.set(input, { lat: wp.lat, lon: wp.lon, text: coordStr });
+        }
+
+        function ensureStopRows(count) {
+            const routeInputs = document.getElementById('routeInputs');
+            const stopRows = Array.from(routeInputs.querySelectorAll('.route-input-row'))
+                .filter((row) => row.querySelector('.route-input')?.dataset.type === 'stop');
+
+            while (stopRows.length > count) {
+                const row = stopRows.pop();
+                if (!row) break;
+                const input = row.querySelector('.route-input');
+                if (input) {
+                    routeInputData.delete(input);
+                }
+                row.remove();
+            }
+
+            while (stopRows.length < count) {
+                const newRow = addStopInput({ focus: false });
+                stopRows.push(newRow);
+            }
+
+            stopCounter = stopRows.length;
+        }
+
+        function syncRouteInputsToWaypoints(waypoints) {
+            const desiredStops = Math.max(0, waypoints.length - 2);
+            ensureStopRows(desiredStops);
+
+            const inputs = Array.from(document.querySelectorAll('.route-input'));
+            routeInputData.clear();
+            inputs.forEach((input, idx) => {
+                if (idx < waypoints.length) {
+                    setRouteInputFromWaypoint(input, waypoints[idx]);
+                } else {
+                    clearRouteInput(input);
+                }
+            });
+            updateMarkerLabels();
+            updateClearButtonState();
         }
 
         function countFilledInputs() {
@@ -1899,35 +1992,9 @@
             updateValidationUI(null);
 
             if (suppressWaypointSync) return;
-            const lastWp = waypoints[waypoints.length - 1];
-            const coordStr = `${lastWp.lat.toFixed(5)}, ${lastWp.lon.toFixed(5)}`;
-
-            // Try to fill an empty input first
-            for (const input of document.querySelectorAll('.route-input')) {
-                if (!input.value.trim() && !input.classList.contains('resolved')) {
-                    input.value = coordStr;
-                    input.classList.add('resolved');
-                    routeInputData.set(input, { lat: lastWp.lat, lon: lastWp.lon, text: coordStr });
-                    currentRouteData = null;
-                    updateValidationUI(null);
-                    updateClearButtonState();
-                    showToast(`Waypoint ${waypoints.length} added`, 'success');
-                    return;
-                }
-            }
-
-            // All inputs filled - add a new stop
-            addStopInput();
-            const newInputs = document.querySelectorAll('.route-input');
-            const newInput = newInputs[newInputs.length - 2]; // Second to last (before End)
-            newInput.value = coordStr;
-            newInput.classList.add('resolved');
-            routeInputData.set(newInput, { lat: lastWp.lat, lon: lastWp.lon, text: coordStr });
-
-            currentRouteData = null;
-            updateValidationUI(null);
-            updateClearButtonState();
-            showToast(`Stop ${waypoints.length - 1} added`, 'success');
+            syncRouteInputsToWaypoints(waypoints);
+            const lastLabel = indexToAlphaLabel(waypoints.length);
+            showToast(`Waypoint ${lastLabel} added`, 'success');
         };
 
         document.getElementById('clearBtn').addEventListener('click', () => {
@@ -2025,7 +2092,7 @@
 
         async function init() {
             try {
-                await FlightPlanner.initViewer('cesiumContainer', CESIUM_ION_TOKEN);
+                await FlightPlanner.initViewer('cesiumContainer', CESIUM_ION_TOKEN, ION_BASE_IMAGERY_ASSET_ID);
 
                 // Initialize autocomplete service with Cesium Ion
                 autocompleteService = new AutocompleteService(FlightPlanner.getViewer());

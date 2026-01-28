@@ -10,6 +10,7 @@
 
     const CONFIG = {
         CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        ION_BASE_IMAGERY_ASSET_ID: Number(CesiumConfig.ionBaseImageryAssetId) || 0,
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2500 }
     };
@@ -238,11 +239,30 @@
     }
 
     async function initViewer() {
-        Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        }
 
-        const terrainProvider = await Cesium.createWorldTerrainAsync();
+        const esriImagery = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
+        esriImagery.errorEvent.addEventListener((error) => {
+            console.warn('[MissionPlan] Esri imagery error:', error);
+        });
+
+        let terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            try {
+                terrainProvider = await Cesium.createWorldTerrainAsync();
+            } catch (error) {
+                console.warn('[MissionPlan] Falling back to ellipsoid terrain:', error);
+                terrainProvider = new Cesium.EllipsoidTerrainProvider();
+            }
+        }
 
         state.viewer = new Cesium.Viewer('missionMap', {
+            imageryProvider: esriImagery,
             terrainProvider,
             globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
             skyAtmosphere: new Cesium.SkyAtmosphere(),
@@ -262,34 +282,50 @@
         state.viewer.scene.globe.enableLighting = true;
         state.viewer.scene.globe.depthTestAgainstTerrain = true;
 
-        try {
-            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
-            state.viewer.scene.primitives.add(tileset);
-        } catch (error) {
-            const esriImagery = new Cesium.UrlTemplateImageryProvider({
-                url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                credit: 'Esri'
-            });
-            state.viewer.imageryLayers.addImageryProvider(esriImagery);
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.ION_BASE_IMAGERY_ASSET_ID) {
+            try {
+                const ionProvider = await Cesium.IonImageryProvider.fromAssetId(CONFIG.ION_BASE_IMAGERY_ASSET_ID);
+                ionProvider.errorEvent.addEventListener((error) => {
+                    console.warn('[MissionPlan] Ion imagery error:', error);
+                });
+                const ionLayer = state.viewer.imageryLayers.addImageryProvider(ionProvider);
+                state.viewer.imageryLayers.raiseToTop(ionLayer);
+                console.log(`[MissionPlan] Cesium Ion imagery loaded (asset ${CONFIG.ION_BASE_IMAGERY_ASSET_ID})`);
+            } catch (error) {
+                console.warn('[MissionPlan] Failed to load Ion imagery; keeping Esri imagery:', error);
+            }
         }
 
-	        state.viewer.camera.setView({
-	            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
-	            orientation: {
-	                heading: Cesium.Math.toRadians(0),
-	                pitch: Cesium.Math.toRadians(-40),
-	                roll: 0
-	            }
-	        });
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.GOOGLE_3D_TILES_ASSET_ID) {
+            try {
+                const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID, {
+                    showOutline: false,
+                    enableShowOutline: false
+                });
+                tileset.showOutline = false;
+                state.viewer.scene.primitives.add(tileset);
+            } catch (error) {
+                console.warn('[MissionPlan] Google 3D Tiles load failed:', error);
+            }
+        }
 
-	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
-	            window.ATCCameraControls.attach(state.viewer);
-	        }
+        state.viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
+            orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-40),
+                roll: 0
+            }
+        });
 
-	        const handler = new Cesium.ScreenSpaceEventHandler(state.viewer.scene.canvas);
-	        handler.setInputAction((movement) => {
-	            const cartesian = pickPosition(movement.position);
-	            if (!cartesian) return;
+        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+            window.ATCCameraControls.attach(state.viewer);
+        }
+
+        const handler = new Cesium.ScreenSpaceEventHandler(state.viewer.scene.canvas);
+        handler.setInputAction((movement) => {
+            const cartesian = pickPosition(movement.position);
+            if (!cartesian) return;
             const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
             const lat = Cesium.Math.toDegrees(cartographic.latitude);
             const lon = Cesium.Math.toDegrees(cartographic.longitude);

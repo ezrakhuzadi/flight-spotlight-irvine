@@ -23,6 +23,7 @@
         ATC_WS_BASE: window.__ATC_WS_BASE__ || '',
         ATC_WS_TOKEN: window.__ATC_WS_TOKEN__ || '',
         CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        ION_BASE_IMAGERY_ASSET_ID: Number(CesiumConfig.ionBaseImageryAssetId) || 0,
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.6846, lon: -117.8265, height: 2000 },
         MAX_TRAIL_POINTS: 60,
@@ -80,6 +81,7 @@
     // Drone tracking
     const droneEntities = new Map();  // droneId -> Cesium.Entity
     const droneTrails = new Map();    // droneId -> [Cartesian3]
+    const trailEntities = new Map();  // droneId -> Cesium.Entity (trail polyline)
     const droneData = new Map();      // droneId -> {lat, lon, alt, speed, heading}
     const headingArrows = new Map();  // droneId -> arrow entity
     let visibleDroneIds = new Set();
@@ -110,15 +112,15 @@
     // Time of day
     let currentTOD = 'realtime';
 
-	    // Orbit camera state
-	    let orbitHeading = 0;
-	    let orbitPitch = Cesium.Math.toRadians(-35);
-	    let orbitRange = 600;
-	    let orbitTarget = null; // Used when orbiting without a tracked drone
-	    const ORBIT_PITCH_MIN = Cesium.Math.toRadians(-80);
-	    const ORBIT_PITCH_MAX = Cesium.Math.toRadians(-10);
-	    const ORBIT_RANGE_MIN = 80;
-	    const ORBIT_RANGE_MAX = 8000;
+    // Orbit camera state
+    let orbitHeading = 0;
+    let orbitPitch = Cesium.Math.toRadians(-35);
+    let orbitRange = 600;
+    let orbitTarget = null; // Used when orbiting without a tracked drone
+    const ORBIT_PITCH_MIN = Cesium.Math.toRadians(-80);
+    const ORBIT_PITCH_MAX = Cesium.Math.toRadians(-10);
+    const ORBIT_RANGE_MIN = 80;
+    const ORBIT_RANGE_MAX = 8000;
     const ORBIT_STEP_HEADING = Cesium.Math.toRadians(10);
     const ORBIT_STEP_PITCH = Cesium.Math.toRadians(5);
     const ORBIT_STEP_RANGE = 150;
@@ -130,9 +132,18 @@
     async function initViewer() {
         console.log('[Map] Initializing Cesium viewer...');
 
-        Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        }
+
+        const imageryProvider = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
 
         viewer = new Cesium.Viewer('cesiumContainer', {
+            imageryProvider,
+            terrainProvider: new Cesium.EllipsoidTerrainProvider(),
             globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
             skyAtmosphere: new Cesium.SkyAtmosphere(),
             geocoder: false,
@@ -161,42 +172,60 @@
         viewer.clock.shouldAnimate = true;
         viewer.clock.multiplier = 1;
 
-        // Load Google Photorealistic 3D Tiles
-        try {
-            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
-            viewer.scene.primitives.add(tileset);
-            console.log('[Map] Google Photorealistic 3D Tiles loaded');
-        } catch (error) {
-            console.error('[Map] Failed to load 3D Tiles:', error);
-            // Fallback to ESRI imagery
+        // Load Google Photorealistic 3D Tiles (optional; requires a valid Cesium Ion token + asset ID).
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.GOOGLE_3D_TILES_ASSET_ID) {
             try {
-                const esriImagery = new Cesium.UrlTemplateImageryProvider({
-                    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    credit: 'Esri'
+                const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID, {
+                    showOutline: false,
+                    enableShowOutline: false
                 });
-                viewer.imageryLayers.addImageryProvider(esriImagery);
-                console.log('[Map] Fallback: Esri Imagery loaded');
-            } catch (e) {
-                console.error('[Map] Fallback imagery also failed', e);
+                tileset.showOutline = false;
+                viewer.scene.primitives.add(tileset);
+                console.log('[Map] Google Photorealistic 3D Tiles loaded');
+            } catch (error) {
+                console.error('[Map] Failed to load 3D Tiles:', error);
             }
         }
 
-	        // Set default view to Irvine
-	        viewer.camera.setView({
-	            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
-	            orientation: {
-	                heading: Cesium.Math.toRadians(0),
-	                pitch: Cesium.Math.toRadians(-45),
-	                roll: 0
-	            }
-	        });
+        // Set default view to Irvine
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(CONFIG.DEFAULT_VIEW.lon, CONFIG.DEFAULT_VIEW.lat, CONFIG.DEFAULT_VIEW.height),
+            orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-45),
+                roll: 0
+            }
+        });
 
-	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
-	            window.ATCCameraControls.attach(viewer);
-	        }
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            if (CONFIG.ION_BASE_IMAGERY_ASSET_ID) {
+                try {
+                    const ionProvider = await Cesium.IonImageryProvider.fromAssetId(CONFIG.ION_BASE_IMAGERY_ASSET_ID);
+                    ionProvider.errorEvent.addEventListener((error) => {
+                        console.warn('[Map] Ion imagery error:', error);
+                    });
+                    const ionLayer = viewer.imageryLayers.addImageryProvider(ionProvider);
+                    viewer.imageryLayers.raiseToTop(ionLayer);
+                    console.log(`[Map] Cesium Ion imagery loaded (asset ${CONFIG.ION_BASE_IMAGERY_ASSET_ID})`);
+                } catch (error) {
+                    console.warn('[Map] Failed to load Cesium Ion imagery; keeping Esri imagery:', error);
+                }
+            }
 
-	        // Set up event handlers
-	        setupEventHandlers();
+            try {
+                viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
+                console.log('[Map] Cesium World Terrain loaded');
+            } catch (error) {
+                console.warn('[Map] Failed to load Cesium World Terrain; using ellipsoid terrain:', error);
+            }
+        }
+
+        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+            window.ATCCameraControls.attach(viewer);
+        }
+
+        // Set up event handlers
+        setupEventHandlers();
 
         // Start polling loops
         document.addEventListener('visibilitychange', () => {
@@ -207,9 +236,9 @@
                 startPollingLoops();
             }
         });
-	        startPollingLoops();
-	        startRealtime();
-	        scheduleRidViewUpdate();
+        startPollingLoops();
+        startRealtime();
+        scheduleRidViewUpdate();
 
         // Check for tracking param from URL
         const params = new URLSearchParams(window.location.search);
@@ -229,6 +258,19 @@
             if (selectedRouteEntity) {
                 viewer.entities.remove(selectedRouteEntity);
                 selectedRouteEntity = null;
+            }
+
+            // If the user clicks a helper entity (trail/arrow), redirect selection to the drone.
+            if (entity && typeof entity.id === 'string') {
+                const rawId = entity.id;
+                if (rawId.startsWith('trail-') || rawId.startsWith('arrow-')) {
+                    const droneId = rawId.slice(6);
+                    const droneEntity = droneEntities.get(droneId);
+                    if (droneEntity && droneEntity !== entity) {
+                        viewer.selectedEntity = droneEntity;
+                        return;
+                    }
+                }
             }
 
             if (entity && flightPlans.has(entity.id)) {
@@ -252,46 +294,60 @@
             }
 
             // Update camera tracking
-	            if (entity && droneEntities.has(entity.id)) {
-	                trackedDroneId = entity.id;
-	                selectedDroneId = entity.id;
-	                updateSelectedDronePanel(droneData.get(entity.id));
-	                showSelectedDronePanel(true);
+            if (entity && droneEntities.has(entity.id)) {
+                trackedDroneId = entity.id;
+                selectedDroneId = entity.id;
+                updateSelectedDronePanel(droneData.get(entity.id));
+                showSelectedDronePanel(true);
 
-	                if (cameraMode === 'orbit') {
-	                    viewer.trackedEntity = undefined;
-	                    orbitTarget = null;
-	                    syncOrbitCamera();
-	                }
-	            } else {
-	                showSelectedDronePanel(false);
-	                trackedDroneId = null;
-	                if (cameraMode === 'orbit') {
-	                    viewer.trackedEntity = undefined;
-	                    orbitTarget = pickOrbitTargetFromScreenCenter();
-	                }
-	            }
-	        });
+                if (cameraMode === 'orbit') {
+                    viewer.trackedEntity = undefined;
+                    orbitTarget = null;
+                    syncOrbitCamera();
+                }
+            } else {
+                showSelectedDronePanel(false);
+                trackedDroneId = null;
+                if (cameraMode === 'orbit') {
+                    viewer.trackedEntity = undefined;
+                    orbitTarget = pickOrbitTargetFromScreenCenter();
+                }
+            }
+        });
 
-	        viewer.camera.moveEnd.addEventListener(() => {
-	            scheduleRidViewUpdate();
-	            if (cameraMode === 'orbit' && !trackedDroneId && orbitTarget) {
-	                updateOrbitStateFromCamera();
-	            }
-	        });
+        viewer.camera.moveEnd.addEventListener(() => {
+            scheduleRidViewUpdate();
+            if (cameraMode === 'orbit' && !trackedDroneId && orbitTarget) {
+                updateOrbitStateFromCamera();
+            }
+        });
 
-	        // Cockpit camera update on tick
-	        viewer.clock.onTick.addEventListener((clock) => {
-	            if (cameraMode === 'orbit') {
-	                // Only auto-sync when orbiting a moving drone.
-	                if (trackedDroneId && droneEntities.has(trackedDroneId)) {
-	                    syncOrbitCamera(clock.currentTime);
-	                }
-	                return;
-	            }
-	            if (cameraMode === 'cockpit' && trackedDroneId && droneEntities.has(trackedDroneId)) {
-	                try {
-	                    const entity = droneEntities.get(trackedDroneId);
+    function syncSelectionIndicator(clock) {
+        if (!viewer || !viewer.selectionIndicator || !viewer.selectionIndicator.viewModel) return;
+        const entity = viewer.selectedEntity;
+        if (!entity || !droneEntities.has(entity.id)) return;
+        const position = entity.position?.getValue
+            ? entity.position.getValue(clock.currentTime)
+            : entity.position;
+        if (!position) return;
+        const viewModel = viewer.selectionIndicator.viewModel;
+        viewModel.position = position;
+        viewModel.showSelection = true;
+    }
+
+    // Cockpit camera update on tick
+    viewer.clock.onTick.addEventListener((clock) => {
+        syncSelectionIndicator(clock);
+        if (cameraMode === 'orbit') {
+            // Only auto-sync when orbiting a moving drone.
+            if (trackedDroneId && droneEntities.has(trackedDroneId)) {
+                syncOrbitCamera(clock.currentTime);
+            }
+                return;
+            }
+            if (cameraMode === 'cockpit' && trackedDroneId && droneEntities.has(trackedDroneId)) {
+                try {
+                    const entity = droneEntities.get(trackedDroneId);
                     if (!entity || !entity.position) return;
 
                     const position = entity.position.getValue(clock.currentTime);
@@ -355,6 +411,11 @@
     }
 
     async function pushRidViewUpdate() {
+        const role = window.APP_USER?.role;
+        if (role !== 'authority' && role !== 'admin') {
+            return;
+        }
+
         const view = computeRidViewBBox();
         if (!view) return;
 
@@ -369,7 +430,7 @@
         lastRidViewKey = viewKey;
 
         try {
-            await fetch(`${CONFIG.ATC_SERVER_URL}/v1/rid/view`, {
+            const response = await fetch(`${CONFIG.ATC_SERVER_URL}/v1/rid/view`, {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {
@@ -378,6 +439,10 @@
                 },
                 body: JSON.stringify(view)
             });
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`RID view sync failed (${response.status}): ${text}`);
+            }
         } catch (error) {
             console.warn('[Map] RID view sync failed:', error);
         }
@@ -697,6 +762,10 @@
                     viewer.entities.remove(entity);
                     droneEntities.delete(id);
                     droneTrails.delete(id);
+                    if (trailEntities.has(id)) {
+                        viewer.entities.remove(trailEntities.get(id));
+                        trailEntities.delete(id);
+                    }
                     droneData.delete(id);
 
                     // Remove heading arrow
@@ -774,6 +843,8 @@
             const source = trafficSource || 'local';
             const statusValue = status || 'active';
             const external = isExternalSource(source);
+            const previousSource = droneData.get(droneId)?.source;
+            const trafficStyleChanged = previousSource !== source;
 
             if (validLon === 0 && validLat === 0) return;
 
@@ -801,13 +872,14 @@
                 </table>
             `;
 
+            const silhouetteColor = getTrafficSilhouetteColor(source);
+            const trailColor = getTrafficTrailColor(source);
+
             if (!droneEntities.has(droneId)) {
                 // Create new drone entity with 3D model
                 const headingRad = Cesium.Math.toRadians(heading || 0);
                 const hpr = new Cesium.HeadingPitchRoll(headingRad, 0, 0);
                 const orientation = Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
-                const silhouetteColor = getTrafficSilhouetteColor(source);
-                const trailColor = getTrafficTrailColor(source);
 
                 const entity = viewer.entities.add({
                     id: droneId,
@@ -836,16 +908,7 @@
                         pixelOffset: new Cesium.Cartesian2(0, -40),
                         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5000)
                     },
-                    description: description,
-                    // Trail polyline
-                    polyline: {
-                        positions: new Cesium.CallbackProperty(() => droneTrails.get(droneId), false),
-                        width: 3,
-                        material: new Cesium.PolylineGlowMaterialProperty({
-                            glowPower: 0.2,
-                            color: trailColor
-                        })
-                    }
+                    description: description
                 });
 
                 droneEntities.set(droneId, entity);
@@ -862,6 +925,33 @@
 
                 entity.description = description;
                 entity.label.text = `${droneId}\n${(speed || 0).toFixed(1)} m/s`;
+            }
+
+            // Keep the trail as a separate entity so Cesium's selection indicator (which anchors
+            // on the selected entity bounding sphere center) stays on the drone model instead of
+            // drifting to the midpoint of the trail polyline.
+            if (!trailEntities.has(droneId)) {
+                const trailEntity = viewer.entities.add({
+                    id: `trail-${droneId}`,
+                    name: `Trail ${droneId}`,
+                    polyline: {
+                        positions: new Cesium.CallbackProperty(() => droneTrails.get(droneId), false),
+                        width: 3,
+                        material: new Cesium.PolylineGlowMaterialProperty({
+                            glowPower: 0.2,
+                            color: trailColor
+                        })
+                    }
+                });
+                trailEntities.set(droneId, trailEntity);
+            } else {
+                const trailEntity = trailEntities.get(droneId);
+                if (trafficStyleChanged && trailEntity && trailEntity.polyline) {
+                    trailEntity.polyline.material = new Cesium.PolylineGlowMaterialProperty({
+                        glowPower: 0.2,
+                        color: trailColor
+                    });
+                }
             }
 
             // Store data
@@ -1482,57 +1572,57 @@
         return Math.max(min, Math.min(max, value));
     }
 
-	    function normalizeHeading(value) {
-	        const twoPi = Math.PI * 2;
-	        let heading = value % twoPi;
-	        if (heading < 0) heading += twoPi;
-	        return heading;
-	    }
+    function normalizeHeading(value) {
+        const twoPi = Math.PI * 2;
+        let heading = value % twoPi;
+        if (heading < 0) heading += twoPi;
+        return heading;
+    }
 
-		    function pickOrbitTargetFromScreenCenter() {
-		        if (!viewer || !viewer.scene || !viewer.scene.canvas) return null;
-		        const canvas = viewer.scene.canvas;
-		        const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+    function pickOrbitTargetFromScreenCenter() {
+        if (!viewer || !viewer.scene || !viewer.scene.canvas) return null;
+        const canvas = viewer.scene.canvas;
+        const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
 
-	        if (viewer.scene.pickPositionSupported) {
-	            try {
-	                const picked = viewer.scene.pickPosition(center);
-	                if (picked) return picked;
-	            } catch (e) {
-	                // Ignore and fall back.
-	            }
-	        }
+        if (viewer.scene.pickPositionSupported) {
+            try {
+                const picked = viewer.scene.pickPosition(center);
+                if (picked) return picked;
+            } catch (e) {
+                // Ignore and fall back.
+            }
+        }
 
-	        const ray = viewer.camera.getPickRay(center);
-	        if (ray) {
-	            const globePick = viewer.scene.globe.pick(ray, viewer.scene);
-	            if (globePick) return globePick;
-	        }
+        const ray = viewer.camera.getPickRay(center);
+        if (ray) {
+            const globePick = viewer.scene.globe.pick(ray, viewer.scene);
+            if (globePick) return globePick;
+        }
 
-		        return viewer.camera.pickEllipsoid(center, viewer.scene.globe.ellipsoid);
-		    }
+        return viewer.camera.pickEllipsoid(center, viewer.scene.globe.ellipsoid);
+    }
 
-		    function updateOrbitStateFromCamera() {
-		        if (!viewer || !orbitTarget) return;
-		        try {
-		            const transform = Cesium.Transforms.eastNorthUpToFixedFrame(orbitTarget);
-		            const inverse = Cesium.Matrix4.inverseTransformation(transform, new Cesium.Matrix4());
-		            const localPos = Cesium.Matrix4.multiplyByPoint(inverse, viewer.camera.positionWC, new Cesium.Cartesian3());
+    function updateOrbitStateFromCamera() {
+        if (!viewer || !orbitTarget) return;
+        try {
+            const transform = Cesium.Transforms.eastNorthUpToFixedFrame(orbitTarget);
+            const inverse = Cesium.Matrix4.inverseTransformation(transform, new Cesium.Matrix4());
+            const localPos = Cesium.Matrix4.multiplyByPoint(inverse, viewer.camera.positionWC, new Cesium.Cartesian3());
 
-		            const x = localPos.x;
-		            const y = localPos.y;
-		            const z = localPos.z;
-		            const horizontal = Math.sqrt(x * x + y * y);
-		            const range = Math.sqrt(horizontal * horizontal + z * z);
-		            if (!Number.isFinite(range) || range <= 0) return;
+            const x = localPos.x;
+            const y = localPos.y;
+            const z = localPos.z;
+            const horizontal = Math.sqrt(x * x + y * y);
+            const range = Math.sqrt(horizontal * horizontal + z * z);
+            if (!Number.isFinite(range) || range <= 0) return;
 
-		            orbitHeading = normalizeHeading(Math.atan2(x, y));
-		            orbitPitch = clamp(-Math.atan2(z, horizontal || 1e-6), ORBIT_PITCH_MIN, ORBIT_PITCH_MAX);
-		            orbitRange = clamp(range, ORBIT_RANGE_MIN, ORBIT_RANGE_MAX);
-		        } catch (e) {
-		            // Ignore.
-		        }
-		    }
+            orbitHeading = normalizeHeading(Math.atan2(x, y));
+            orbitPitch = clamp(-Math.atan2(z, horizontal || 1e-6), ORBIT_PITCH_MIN, ORBIT_PITCH_MAX);
+            orbitRange = clamp(range, ORBIT_RANGE_MIN, ORBIT_RANGE_MAX);
+        } catch (e) {
+            // Ignore.
+        }
+    }
 
     function setOrbitAxisVisible(isVisible) {
         const axis = document.getElementById('orbitAxis');
@@ -1540,42 +1630,42 @@
         axis.classList.toggle('active', isVisible);
     }
 
-	    function syncOrbitCamera(clockTime) {
-	        if (!viewer || cameraMode !== 'orbit') return;
+    function syncOrbitCamera(clockTime) {
+        if (!viewer || cameraMode !== 'orbit') return;
 
-	        const time = clockTime || viewer.clock.currentTime;
-	        let target = null;
+        const time = clockTime || viewer.clock.currentTime;
+        let target = null;
 
-	        if (trackedDroneId) {
-	            const entity = droneEntities.get(trackedDroneId);
-	            if (entity && entity.position) {
-	                try {
-	                    target = entity.position.getValue(time);
-	                } catch (e) {
-	                    target = null;
-	                }
-	            }
-	        }
+        if (trackedDroneId) {
+            const entity = droneEntities.get(trackedDroneId);
+            if (entity && entity.position) {
+                try {
+                    target = entity.position.getValue(time);
+                } catch (e) {
+                    target = null;
+                }
+            }
+        }
 
-	        if (!target) {
-	            if (!orbitTarget) {
-	                orbitTarget = pickOrbitTargetFromScreenCenter();
-	            }
-	            target = orbitTarget;
-	        }
+        if (!target) {
+            if (!orbitTarget) {
+                orbitTarget = pickOrbitTargetFromScreenCenter();
+            }
+            target = orbitTarget;
+        }
 
-	        if (!target) return;
+        if (!target) return;
 
-	        const offset = new Cesium.HeadingPitchRange(orbitHeading, orbitPitch, orbitRange);
-	        viewer.camera.lookAt(target, offset);
-	    }
+        const offset = new Cesium.HeadingPitchRange(orbitHeading, orbitPitch, orbitRange);
+        viewer.camera.lookAt(target, offset);
+    }
 
-	    function resetOrbit() {
-	        orbitHeading = 0;
-	        orbitPitch = Cesium.Math.toRadians(-35);
-	        orbitRange = 600;
-	        syncOrbitCamera();
-	    }
+    function resetOrbit() {
+        orbitHeading = 0;
+        orbitPitch = Cesium.Math.toRadians(-35);
+        orbitRange = 600;
+        syncOrbitCamera();
+    }
 
     function nudgeOrbit(action) {
         switch (action) {
@@ -1606,45 +1696,45 @@
         syncOrbitCamera();
     }
 
-	    function setCameraMode(mode) {
-	        cameraMode = mode;
-	        console.log('[Map] Camera mode:', mode);
+    function setCameraMode(mode) {
+        cameraMode = mode;
+        console.log('[Map] Camera mode:', mode);
 
         if (!viewer) {
             setOrbitAxisVisible(mode === 'orbit');
             return;
         }
 
-	        if (mode === 'free') {
-	            viewer.trackedEntity = undefined;
-	            viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
-	            orbitTarget = null;
-	            setOrbitAxisVisible(false);
-	        } else if (mode === 'orbit') {
-	            viewer.trackedEntity = undefined;
-	            orbitTarget = trackedDroneId ? null : pickOrbitTargetFromScreenCenter();
-	            setOrbitAxisVisible(true);
-	            syncOrbitCamera();
-	        } else if (mode === 'cockpit') {
-	            viewer.trackedEntity = undefined;
-	            viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
-	            orbitTarget = null;
-	            if (!trackedDroneId) {
-	                try {
-	                    viewer.camera.setView({
-	                        destination: viewer.camera.positionWC,
-	                        orientation: {
-	                            heading: viewer.camera.heading,
-	                            pitch: Cesium.Math.toRadians(-10),
-	                            roll: 0
-	                        }
-	                    });
-	                } catch (e) {
-	                    // Ignore.
-	                }
-	            }
-	            setOrbitAxisVisible(false);
-	        }
+        if (mode === 'free') {
+            viewer.trackedEntity = undefined;
+            viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+            orbitTarget = null;
+            setOrbitAxisVisible(false);
+        } else if (mode === 'orbit') {
+            viewer.trackedEntity = undefined;
+            orbitTarget = trackedDroneId ? null : pickOrbitTargetFromScreenCenter();
+            setOrbitAxisVisible(true);
+            syncOrbitCamera();
+        } else if (mode === 'cockpit') {
+            viewer.trackedEntity = undefined;
+            viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+            orbitTarget = null;
+            if (!trackedDroneId) {
+                try {
+                    viewer.camera.setView({
+                        destination: viewer.camera.positionWC,
+                        orientation: {
+                            heading: viewer.camera.heading,
+                            pitch: Cesium.Math.toRadians(-10),
+                            roll: 0
+                        }
+                    });
+                } catch (e) {
+                    // Ignore.
+                }
+            }
+            setOrbitAxisVisible(false);
+        }
 
         // Update button styles
         ['free', 'orbit', 'cockpit'].forEach(m => {

@@ -203,21 +203,23 @@
                     </button>
                 </form>
 
-                <div class="divider"><span>or</span></div>
+                <% if (typeof guestLoginEnabled !== 'undefined' && guestLoginEnabled) { %>
+                    <div class="divider"><span>or</span></div>
 
-                <form action="/login/guest" method="POST">
-                    <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
-                    <button type="submit" class="login-btn login-btn-guest">
-                        Continue as Guest
-                    </button>
-                </form>
+                    <form action="/login/guest" method="POST">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
+                        <button type="submit" class="login-btn login-btn-guest">
+                            Continue as Guest
+                        </button>
+                    </form>
 
-                <div class="guest-info">
-                    <p>Demo credentials for testing:</p>
-                    <div class="guest-credentials">
-                        Username: <strong>guest</strong> | Password: <strong>guest123</strong>
+                    <div class="guest-info">
+                        <p>Demo credentials for testing:</p>
+                        <div class="guest-credentials">
+                            Username: <strong>guest</strong> | Password: <strong>guest123</strong>
+                        </div>
                     </div>
-                </div>
+                <% } %>
 
                 <div class="login-link"
                     style="text-align: center; margin-top: 24px; color: var(--text-muted); font-size: 14px;">

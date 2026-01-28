@@ -72,6 +72,33 @@
         return '';
     }
 
+    function resolveCsrfToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        const metaToken = meta && typeof meta.content === 'string' ? meta.content.trim() : '';
+        const candidates = [
+            root.__CSRF_TOKEN__,
+            safeParentValue('__CSRF_TOKEN__'),
+            metaToken
+        ];
+        for (const candidate of candidates) {
+            if (typeof candidate === 'string' && candidate.trim()) {
+                return candidate.trim();
+            }
+        }
+        return '';
+    }
+
+    function jsonHeadersWithCsrf() {
+        const csrfToken = resolveCsrfToken();
+        if (csrfToken) {
+            return {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            };
+        }
+        return { 'Content-Type': 'application/json' };
+    }
+
     function resolveAtcBase() {
         const candidates = [
             root.__ATC_API_BASE__,
@@ -148,7 +175,7 @@
         };
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: jsonHeadersWithCsrf(),
             credentials: 'same-origin',
             body: JSON.stringify(payload)
         });
@@ -193,7 +220,7 @@
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: jsonHeadersWithCsrf(),
             credentials: 'same-origin',
             body: JSON.stringify(payload)
         });
@@ -234,15 +261,37 @@
      * Initialize the Cesium viewer with terrain and OSM Buildings
      * @param {string} containerId - DOM element ID for the viewer
      * @param {string} ionToken - Cesium Ion access token
+     * @param {number} ionBaseImageryAssetId - Optional Ion imagery asset ID to use as the base layer
      * @returns {Promise<Cesium.Viewer>}
      */
-	    async function initViewer(containerId, ionToken) {
-	        Cesium.Ion.defaultAccessToken = ionToken;
+    async function initViewer(containerId, ionToken, ionBaseImageryAssetId = 0) {
+        if (ionToken) {
+            Cesium.Ion.defaultAccessToken = ionToken;
+        }
 
-	        console.log('[Planner] Initializing Cesium viewer...');
+        console.log('[Planner] Initializing Cesium viewer...');
 
-	        viewer = new Cesium.Viewer(containerId, {
-            terrainProvider: await Cesium.createWorldTerrainAsync(),
+        const esriImagery = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
+        esriImagery.errorEvent.addEventListener((error) => {
+            console.warn('[Planner] Esri imagery error:', error);
+        });
+
+        let terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        if (ionToken) {
+            try {
+                terrainProvider = await Cesium.createWorldTerrainAsync();
+            } catch (error) {
+                console.warn('[Planner] Falling back to ellipsoid terrain:', error);
+                terrainProvider = new Cesium.EllipsoidTerrainProvider();
+            }
+        }
+
+        viewer = new Cesium.Viewer(containerId, {
+            imageryProvider: esriImagery,
+            terrainProvider,
             animation: false,
             timeline: false,
             baseLayerPicker: false,
@@ -253,20 +302,42 @@
             navigationHelpButton: false,
             infoBox: true,
             fullscreenButton: false
-	        });
+        });
 
-	        viewer.scene.globe.depthTestAgainstTerrain = true;
+        if (ionToken && ionBaseImageryAssetId) {
+            try {
+                const ionProvider = await Cesium.IonImageryProvider.fromAssetId(Number(ionBaseImageryAssetId));
+                ionProvider.errorEvent.addEventListener((error) => {
+                    console.warn('[Planner] Ion imagery error:', error);
+                });
+                const ionLayer = viewer.imageryLayers.addImageryProvider(ionProvider);
+                viewer.imageryLayers.raiseToTop(ionLayer);
+                console.log(`[Planner] Cesium Ion imagery loaded (asset ${ionBaseImageryAssetId})`);
+            } catch (error) {
+                console.warn('[Planner] Failed to load Ion imagery; using Esri imagery:', error);
+            }
+        }
 
-	        if (root.ATCCameraControls && typeof root.ATCCameraControls.attach === 'function') {
-	            root.ATCCameraControls.attach(viewer);
-	        }
+        viewer.scene.globe.depthTestAgainstTerrain = true;
 
-	        // Load OSM Buildings
-	        console.log('[Planner] Loading OSM Buildings tileset...');
-	        osmTileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.OSM_BUILDINGS_ASSET_ID);
-	        viewer.scene.primitives.add(osmTileset);
-	        await osmTileset.readyPromise;
-	        console.log('[Planner] OSM Buildings loaded');
+        if (root.ATCCameraControls && typeof root.ATCCameraControls.attach === 'function') {
+            root.ATCCameraControls.attach(viewer);
+        }
+
+        // Load OSM Buildings
+        if (ionToken) {
+            console.log('[Planner] Loading OSM Buildings tileset...');
+            osmTileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.OSM_BUILDINGS_ASSET_ID, {
+                showOutline: false,
+                enableShowOutline: false
+            });
+            osmTileset.showOutline = false;
+            viewer.scene.primitives.add(osmTileset);
+            await osmTileset.readyPromise;
+            console.log('[Planner] OSM Buildings loaded');
+        } else {
+            console.warn('[Planner] CESIUM_ION_TOKEN not set; skipping OSM buildings tileset');
+        }
 
         if (root.RoutePlanner && typeof root.RoutePlanner.init === 'function') {
             await root.RoutePlanner.init(viewer, {
@@ -316,21 +387,23 @@
      * @param {number} lon - Longitude
      * @param {number} alt - Altitude in meters (above ellipsoid)
      */
+    function indexToAlphaLabel(index) {
+        let n = Math.max(1, index);
+        let label = '';
+        while (n > 0) {
+            const rem = (n - 1) % 26;
+            label = String.fromCharCode(65 + rem) + label;
+            n = Math.floor((n - 1) / 26);
+        }
+        return label;
+    }
+
     /**
      * Get waypoint label that matches the sidebar UI:
-     * - Index 1: "A (Start)"
-     * - Intermediate: "1", "2", "3"... (numbered stops)
-     * - Last: "B" (destination)
+     * - A, B, C... (sequential)
      */
     function getWaypointLabel(index, totalWaypoints) {
-        if (index === 1) {
-            return 'A (Start)';
-        } else if (index === totalWaypoints) {
-            return 'B';
-        } else {
-            // Intermediate stops are numbered starting from 1
-            return String(index - 1);
-        }
+        return indexToAlphaLabel(index);
     }
 
     function addWaypoint(lat, lon, alt) {
@@ -338,7 +411,7 @@
 
         waypoints.push({ lat, lon, alt, index: waypointIndex });
 
-        // Generate label that matches sidebar: A (Start), 1, 2, ... B
+        // Generate label that matches sidebar: A, B, C...
         const labelText = getWaypointLabel(waypointIndex, waypointIndex);
 
         // Determine marker color: green for start, cyan for others
@@ -384,7 +457,7 @@
 
     /**
      * Update all waypoint labels to match the sidebar pattern:
-     * A (Start), 1, 2, 3..., B
+     * A, B, C...
      * This is called after adding/removing waypoints.
      */
     function updateWaypointLabels() {
@@ -1032,9 +1105,7 @@
             const submitUrl = joinUrl(resolveAtcBase(), CONFIG.SUBMIT_FLIGHT_ENDPOINT);
             const response = await fetch(submitUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: jsonHeadersWithCsrf(),
                 credentials: 'same-origin',
                 body: JSON.stringify(payload)
             });

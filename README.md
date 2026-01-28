@@ -74,6 +74,11 @@ For local demos only, you can allow the legacy defaults by setting:
 └── server.js              # Main server entry
 ```
 
+## 3D Drone Models
+
+- Runtime model served to the browser: `static/models/drone.glb` (referenced by `static/js/map.js`)
+- Source assets (not served): `models-src/` (`drone.blend`, `drone.fbx`, `drone_alt.glb`)
+
 ---
 
 ## 🛩️ Flight Planner Module

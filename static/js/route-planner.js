@@ -52,6 +52,23 @@
 
     const ATC_SERVER_URL = resolveAtcBase();
 
+    async function ensureCsrfToken() {
+        if (root.__CSRF_TOKEN__) return root.__CSRF_TOKEN__;
+        try {
+            const response = await fetch('/csrf', { credentials: 'same-origin' });
+            if (!response.ok) {
+                return root.__CSRF_TOKEN__ || '';
+            }
+            const data = await response.json().catch(() => ({}));
+            if (data && data.csrfToken) {
+                root.__CSRF_TOKEN__ = data.csrfToken;
+            }
+        } catch (error) {
+            // Ignore; CSRF will still fail if token is required.
+        }
+        return root.__CSRF_TOKEN__ || '';
+    }
+
     const DEFAULTS = Object.assign({
         OSM_BUILDINGS_ASSET_ID: Number(CesiumConfig.osmBuildingsAssetId) || 96188,
         FAA_MAX_ALTITUDE_AGL_M: 121,
@@ -172,12 +189,13 @@
             lane_expansion_step_m: config.LANE_EXPANSION_STEP_M
         };
 
+        const csrfToken = await ensureCsrfToken();
         const response = await fetch(joinUrl(ATC_SERVER_URL, '/v1/routes/plan'), {
             method: 'POST',
             credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRF-Token': window.__CSRF_TOKEN__ || ''
+                'X-CSRF-Token': csrfToken || ''
             },
             body: JSON.stringify(payload)
         });
@@ -233,8 +251,12 @@
         if (state.osmTileset) return state.osmTileset;
         if (state.osmTilesetPromise) return state.osmTilesetPromise;
 
-        state.osmTilesetPromise = Cesium.Cesium3DTileset.fromIonAssetId(config.OSM_BUILDINGS_ASSET_ID)
+        state.osmTilesetPromise = Cesium.Cesium3DTileset.fromIonAssetId(config.OSM_BUILDINGS_ASSET_ID, {
+            showOutline: false,
+            enableShowOutline: false
+        })
             .then((tileset) => {
+                tileset.showOutline = false;
                 state.osmTileset = tileset;
                 state.viewer.scene.primitives.add(tileset);
                 return tileset;

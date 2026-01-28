@@ -1,4 +1,4 @@
-<% const createButton = (user && user.role === 'authority') ? '<a href="/control/geofences/create" class="btn btn-primary btn-sm">+ Create</a>' : ''; %>
+<% const createButton = (user && (user.role === 'authority' || user.role === 'admin')) ? '<a href="/control/geofences/create" class="btn btn-primary btn-sm">+ Create</a>' : ''; %>
 <%- include('layouts/main', { title: 'Geofences' , activePage: 'geofences' , head: ` <!-- CesiumJS -->
     <script src="/assets/Build/Cesium/Cesium.js"></script>
     <style>

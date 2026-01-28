@@ -36,8 +36,16 @@
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
   const ALLOW_DEFAULT_USERS = process.env.ATC_ALLOW_DEFAULT_USERS === "1";
   const CESIUM_ION_TOKEN = process.env.CESIUM_ION_TOKEN || "";
-  const GOOGLE_3D_TILES_ASSET_ID = Number(process.env.GOOGLE_3D_TILES_ASSET_ID);
-  const OSM_BUILDINGS_ASSET_ID = Number(process.env.OSM_BUILDINGS_ASSET_ID);
+  const DEFAULT_ION_BASE_IMAGERY_ASSET_ID = 2; // Bing Maps Aerial
+  const DEFAULT_GOOGLE_3D_TILES_ASSET_ID = 2275207; // Google Photorealistic 3D Tiles (Ion global asset)
+  const DEFAULT_OSM_BUILDINGS_ASSET_ID = 96188; // Cesium OSM Buildings (Ion global asset)
+
+  const ION_BASE_IMAGERY_ASSET_ID =
+    parseOptionalInt(process.env.ION_BASE_IMAGERY_ASSET_ID) ?? DEFAULT_ION_BASE_IMAGERY_ASSET_ID;
+  const GOOGLE_3D_TILES_ASSET_ID =
+    parseOptionalInt(process.env.GOOGLE_3D_TILES_ASSET_ID) ?? DEFAULT_GOOGLE_3D_TILES_ASSET_ID;
+  const OSM_BUILDINGS_ASSET_ID =
+    parseOptionalInt(process.env.OSM_BUILDINGS_ASSET_ID) ?? DEFAULT_OSM_BUILDINGS_ASSET_ID;
   const ROUTE_ENGINE_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_ENGINE_CONFIG, "ATC_ROUTE_ENGINE_CONFIG");
   const ROUTE_PLANNER_CONFIG = parseJsonConfig(process.env.ATC_ROUTE_PLANNER_CONFIG, "ATC_ROUTE_PLANNER_CONFIG");
 
@@ -167,6 +175,15 @@
       console.warn(`[CONFIG] ${label} is not valid JSON:`, error.message);
       return null;
     }
+  }
+
+  function parseOptionalInt(value) {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.trunc(parsed);
   }
 
   function buildSeedUser(prefix, fallback) {
@@ -351,29 +368,62 @@
   app.locals.routeEngineConfig = ROUTE_ENGINE_CONFIG || {};
   app.locals.routePlannerConfig = ROUTE_PLANNER_CONFIG || {};
 
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     const nonce = crypto.randomBytes(16).toString("base64");
     res.locals.cspNonce = nonce;
 
+    const requestPath = typeof req.path === "string" ? req.path : "";
+    const allowsSameOriginFraming = requestPath.startsWith("/assets/planner/");
+    const isPlannerAsset = requestPath.startsWith("/assets/planner/");
+    const needsCesiumUnsafeEval =
+      requestPath === "/control/map" ||
+      requestPath === "/control/remote-id" ||
+      requestPath.startsWith("/control/geofences") ||
+      requestPath.startsWith("/control/missions") ||
+      requestPath.startsWith("/assets/planner/");
+
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-Frame-Options", allowsSameOriginFraming ? "SAMEORIGIN" : "DENY");
     res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
-    res.setHeader(
-      "Content-Security-Policy",
-      [
-        "default-src 'self'",
-        `script-src 'self' 'nonce-${nonce}'`,
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-        "font-src 'self' https://fonts.gstatic.com data:",
-        "img-src 'self' data: blob: https:",
-        "connect-src 'self' https: ws: wss:",
-        "worker-src 'self' blob:",
-        "object-src 'none'",
-        "base-uri 'self'",
-        "frame-ancestors 'none'"
-      ].join("; ")
-    );
+    if (isPlannerAsset) {
+      // The embedded planner is a static app with inline scripts. A nonce-based CSP will block it.
+      // Keep this scoped to /assets/planner/* only.
+      res.setHeader(
+        "Content-Security-Policy",
+        [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://dev.virtualearth.net",
+          "script-src-attr 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com data:",
+          "img-src 'self' data: blob: https: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
+          "connect-src 'self' https: ws: wss: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
+          "worker-src 'self' blob:",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "frame-ancestors 'self'"
+        ].join("; ")
+      );
+    } else {
+      res.setHeader(
+        "Content-Security-Policy",
+        [
+          "default-src 'self'",
+          `script-src 'self' 'nonce-${nonce}'${needsCesiumUnsafeEval ? " 'unsafe-eval' blob:" : ""} https://dev.virtualearth.net`,
+          // UI templates use inline onclick handlers; allow attributes without enabling inline <script> globally.
+          "script-src-attr 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com data:",
+          "img-src 'self' data: blob: https: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
+          "connect-src 'self' https: ws: wss: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
+          "worker-src 'self' blob:",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "frame-ancestors 'none'"
+        ].join("; ")
+      );
+    }
     if (IS_PRODUCTION) {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }
@@ -479,6 +529,12 @@
     next();
   });
 
+  // Provide a CSRF token for embedded/static apps (e.g., planner iframe).
+  app.get("/csrf", (req, res) => {
+    const token = ensureCsrfToken(req);
+    res.json({ csrfToken: token || "" });
+  });
+
   // Require CSRF protection for any state-changing requests.
   app.use(csrfProtection);
 
@@ -502,6 +558,9 @@
     res.locals.osmBuildingsAssetId = Number.isFinite(OSM_BUILDINGS_ASSET_ID)
       ? OSM_BUILDINGS_ASSET_ID
       : null;
+    res.locals.ionBaseImageryAssetId = Number.isFinite(ION_BASE_IMAGERY_ASSET_ID)
+      ? ION_BASE_IMAGERY_ASSET_ID
+      : null;
     next();
   });
 
@@ -514,7 +573,8 @@
     if (req.session.user) {
       return res.redirect('/control');
     }
-    res.render('login', { error: null });
+    const guestLoginEnabled = Boolean(userStore.getUserById("guest"));
+    res.render('login', { error: null, guestLoginEnabled });
   });
 
   // Login form submission
@@ -540,6 +600,14 @@
   // Guest login (one-click)
   app.post('/login/guest', (req, res) => {
     const guest = userStore.getUserById('guest');
+    if (!guest) {
+      console.warn("[AUTH] Guest login requested but no guest user is configured.");
+      return res.status(400).render("login", {
+        error:
+          "Guest login is not configured. Create a guest user or set ATC_ALLOW_DEFAULT_USERS=1 (dev only), then restart.",
+        guestLoginEnabled: false
+      });
+    }
     req.session.user = {
       id: guest.id,
       name: guest.name,
@@ -794,7 +862,7 @@
     }
   });
 
-  app.post("/api/rid/demo", requireRole("authority"), async (req, res) => {
+  app.post("/api/rid/demo", requireRole(["authority", "admin"]), async (req, res) => {
     if (!DEMO_MODE) {
       return res.status(404).json({ message: "not_found" });
     }
@@ -892,12 +960,21 @@
     if (requestPath.startsWith("/v1/geofences") && ["POST", "PUT", "DELETE"].includes(method)) {
       return true;
     }
+    if (requestPath === "/v1/rid/view" && method === "POST") {
+      return true;
+    }
     if (requestPath.startsWith("/v1/admin")) return true;
     return false;
   }
 
   function requiresAdminTokenForAtc(method, requestPath) {
     if (requestPath.startsWith("/v1/admin")) {
+      return true;
+    }
+    if (requestPath === "/v1/rid/view" && method === "POST") {
+      return true;
+    }
+    if (requestPath.startsWith("/v1/geofences") && ["POST", "PUT", "DELETE"].includes(method)) {
       return true;
     }
     if (requestPath === "/v1/commands" && ["GET", "POST"].includes(method)) {
@@ -922,7 +999,8 @@
   }
 
   function isAuthority(req) {
-    return req.session.user?.role === "authority";
+    const role = req.session.user?.role;
+    return role === "authority" || role === "admin";
   }
 
   async function canAccessDrone(req, droneId) {
@@ -1006,7 +1084,7 @@
     if (!isAllowedAtcProxy(method, requestPath)) {
       return res.status(404).json({ message: "not_found" });
     }
-    if (requiresAuthorityForAtc(method, requestPath) && req.session.user?.role !== "authority") {
+    if (requiresAuthorityForAtc(method, requestPath) && !isAuthority(req)) {
       return res.status(403).json({ message: "insufficient_role" });
     }
     if (!isAuthority(req)) {

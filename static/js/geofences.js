@@ -14,6 +14,7 @@
 
     const CONFIG = {
         CESIUM_ION_TOKEN: CesiumConfig.ionToken || '',
+        ION_BASE_IMAGERY_ASSET_ID: Number(CesiumConfig.ionBaseImageryAssetId) || 0,
         GOOGLE_3D_TILES_ASSET_ID: Number(CesiumConfig.google3dTilesAssetId) || 0,
         DEFAULT_VIEW: { lat: 33.66, lon: -117.84, height: 8000 }
     };
@@ -37,9 +38,21 @@
     async function initViewer() {
         console.log('[Geofences] Initializing Cesium viewer...');
 
-        Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        }
+
+        const esriImagery = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            credit: 'Esri'
+        });
+        esriImagery.errorEvent.addEventListener((error) => {
+            console.warn('[Geofences] Esri imagery error:', error);
+        });
 
         viewer = new Cesium.Viewer('cesiumContainer', {
+            imageryProvider: esriImagery,
+            terrainProvider: new Cesium.EllipsoidTerrainProvider(),
             globe: new Cesium.Globe(Cesium.Ellipsoid.WGS84),
             skyAtmosphere: new Cesium.SkyAtmosphere(),
             geocoder: false,
@@ -68,24 +81,53 @@
         viewer.clock.shouldAnimate = true;
         viewer.clock.multiplier = 1;
 
-	        // Load Google Photorealistic 3D Tiles
-	        try {
-	            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID);
-	            viewer.scene.primitives.add(tileset);
-	            console.log('[Geofences] Google 3D Tiles loaded');
-	        } catch (e) {
-	            console.error('[Geofences] Failed to load 3D tiles:', e);
-	        }
+        if (CONFIG.CESIUM_ION_TOKEN) {
+            if (CONFIG.ION_BASE_IMAGERY_ASSET_ID) {
+                try {
+                    const ionProvider = await Cesium.IonImageryProvider.fromAssetId(CONFIG.ION_BASE_IMAGERY_ASSET_ID);
+                    ionProvider.errorEvent.addEventListener((error) => {
+                        console.warn('[Geofences] Ion imagery error:', error);
+                    });
+                    const ionLayer = viewer.imageryLayers.addImageryProvider(ionProvider);
+                    viewer.imageryLayers.raiseToTop(ionLayer);
+                    console.log(`[Geofences] Cesium Ion imagery loaded (asset ${CONFIG.ION_BASE_IMAGERY_ASSET_ID})`);
+                } catch (error) {
+                    console.warn('[Geofences] Failed to load Ion imagery; keeping Esri imagery:', error);
+                }
+            }
 
-	        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
-	            window.ATCCameraControls.attach(viewer);
-	        }
+            try {
+                viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
+                console.log('[Geofences] Cesium World Terrain loaded');
+            } catch (error) {
+                console.warn('[Geofences] Failed to load World Terrain; using ellipsoid terrain:', error);
+            }
+        }
 
-	        // Set initial view
-	        resetView();
+        // Load Google Photorealistic 3D Tiles (optional)
+        if (CONFIG.CESIUM_ION_TOKEN && CONFIG.GOOGLE_3D_TILES_ASSET_ID) {
+            try {
+                const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(CONFIG.GOOGLE_3D_TILES_ASSET_ID, {
+                    showOutline: false,
+                    enableShowOutline: false
+                });
+                tileset.showOutline = false;
+                viewer.scene.primitives.add(tileset);
+                console.log('[Geofences] Google 3D Tiles loaded');
+            } catch (e) {
+                console.error('[Geofences] Failed to load 3D tiles:', e);
+            }
+        }
 
-	        console.log('[Geofences] Viewer initialized');
-	    }
+        if (window.ATCCameraControls && typeof window.ATCCameraControls.attach === 'function') {
+            window.ATCCameraControls.attach(viewer);
+        }
+
+        // Set initial view
+        resetView();
+
+        console.log('[Geofences] Viewer initialized');
+    }
 
     async function loadGeofences() {
         try {
