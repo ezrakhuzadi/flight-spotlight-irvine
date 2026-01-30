@@ -662,6 +662,116 @@
     });
   }
 
+  function normalizeAuthKey(value) {
+    if (typeof value !== "string") return "";
+    return value.trim().toLowerCase();
+  }
+
+  function getClientIp(req) {
+    if (typeof req.ip === "string" && req.ip) return req.ip;
+    const remote = req.socket?.remoteAddress || req.connection?.remoteAddress;
+    return typeof remote === "string" ? remote : "";
+  }
+
+  function createFailureLockoutTracker({ windowMs, maxFailures, lockoutMs }) {
+    const state = new Map();
+
+    function getEntry(key, now) {
+      const existing = state.get(key);
+      if (!existing) {
+        return { failures: 0, windowStart: now, lockUntil: 0 };
+      }
+
+      if (existing.lockUntil && now < existing.lockUntil) return existing;
+      if (now - existing.windowStart > windowMs) {
+        return { failures: 0, windowStart: now, lockUntil: 0 };
+      }
+      return existing;
+    }
+
+    function isLocked(key) {
+      const normalized = normalizeAuthKey(key);
+      if (!normalized) return 0;
+      const now = Date.now();
+      const entry = getEntry(normalized, now);
+      if (entry.failures === 0 && !entry.lockUntil) {
+        state.delete(normalized);
+        return 0;
+      }
+      state.set(normalized, entry);
+      return entry.lockUntil && now < entry.lockUntil ? entry.lockUntil : 0;
+    }
+
+    function registerFailure(key) {
+      const normalized = normalizeAuthKey(key);
+      if (!normalized) return 0;
+      const now = Date.now();
+      const entry = getEntry(normalized, now);
+      if (entry.lockUntil && now < entry.lockUntil) {
+        state.set(normalized, entry);
+        return entry.lockUntil;
+      }
+      entry.failures += 1;
+      if (entry.failures >= maxFailures) {
+        entry.lockUntil = now + lockoutMs;
+      }
+      state.set(normalized, entry);
+      return entry.lockUntil && now < entry.lockUntil ? entry.lockUntil : 0;
+    }
+
+    function reset(key) {
+      const normalized = normalizeAuthKey(key);
+      if (!normalized) return;
+      state.delete(normalized);
+    }
+
+    return { isLocked, registerFailure, reset };
+  }
+
+  function createRequestRateLimiter({ windowMs, maxRequests }) {
+    const state = new Map();
+
+    function check(key) {
+      const normalized = normalizeAuthKey(key);
+      if (!normalized) return { allowed: true, retryAfterSeconds: 0 };
+      const now = Date.now();
+      const existing = state.get(normalized);
+
+      if (!existing || now >= existing.resetAt) {
+        const resetAt = now + windowMs;
+        state.set(normalized, { count: 1, resetAt });
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+
+      existing.count += 1;
+      state.set(normalized, existing);
+      if (existing.count <= maxRequests) {
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      return { allowed: false, retryAfterSeconds };
+    }
+
+    return { check };
+  }
+
+  const loginFailuresByIp = createFailureLockoutTracker({
+    windowMs: 15 * 60 * 1000,
+    maxFailures: 50,
+    lockoutMs: 15 * 60 * 1000
+  });
+
+  const loginFailuresByUser = createFailureLockoutTracker({
+    windowMs: 15 * 60 * 1000,
+    maxFailures: 10,
+    lockoutMs: 15 * 60 * 1000
+  });
+
+  const signupRateLimitByIp = createRequestRateLimiter({
+    windowMs: 60 * 60 * 1000,
+    maxRequests: 20
+  });
+
   // Login page
   app.get('/login', (req, res) => {
     if (req.session.user) {
@@ -673,13 +783,54 @@
 
   // Login form submission
   app.post('/login', (req, res) => {
-    const { username, password } = req.body;
+    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    const password = req.body?.password;
+    const clientIp = getClientIp(req);
+    const userKey = normalizeAuthKey(username);
+
+    const guestLoginEnabled = !IS_PRODUCTION && Boolean(userStore.getUserById("guest"));
+
+    const ipLockedUntilMs = loginFailuresByIp.isLocked(clientIp);
+    if (ipLockedUntilMs) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((ipLockedUntilMs - Date.now()) / 1000));
+      res.set("Retry-After", String(retryAfterSeconds));
+      return res.status(429).render("login", {
+        error: `Too many login attempts. Try again in ${retryAfterSeconds}s.`,
+        guestLoginEnabled
+      });
+    }
+
     const user = userStore.getUserById(username);
+    if (user) {
+      const userLockedUntilMs = userKey ? loginFailuresByUser.isLocked(userKey) : 0;
+      if (userLockedUntilMs) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((userLockedUntilMs - Date.now()) / 1000));
+        res.set("Retry-After", String(retryAfterSeconds));
+        return res.status(429).render("login", {
+          error: `Too many login attempts. Try again in ${retryAfterSeconds}s.`,
+          guestLoginEnabled
+        });
+      }
+    }
     if (user && verifyPassword(user, password)) {
+      loginFailuresByIp.reset(clientIp);
+      if (userKey) loginFailuresByUser.reset(userKey);
       return establishSession(req, res, user, "/control");
     }
 
-    res.render('login', { error: 'Invalid username or password' });
+    const ipLock = loginFailuresByIp.registerFailure(clientIp);
+    const userLock = user && userKey ? loginFailuresByUser.registerFailure(userKey) : 0;
+    const newLockedUntilMs = Math.max(ipLock || 0, userLock || 0);
+    if (newLockedUntilMs) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((newLockedUntilMs - Date.now()) / 1000));
+      res.set("Retry-After", String(retryAfterSeconds));
+      return res.status(429).render("login", {
+        error: `Too many login attempts. Try again in ${retryAfterSeconds}s.`,
+        guestLoginEnabled
+      });
+    }
+
+    return res.render("login", { error: "Invalid username or password", guestLoginEnabled });
   });
 
   // Guest login (one-click)
@@ -709,6 +860,15 @@
   // Signup form submission
   app.post('/signup', (req, res) => {
     const { username, email, password, confirmPassword, name } = req.body;
+    const clientIp = getClientIp(req);
+    const ipRate = signupRateLimitByIp.check(clientIp);
+    if (!ipRate.allowed) {
+      res.set("Retry-After", String(ipRate.retryAfterSeconds));
+      return res.status(429).render("signup", {
+        error: `Too many signup attempts. Try again in ${ipRate.retryAfterSeconds}s.`,
+        success: null
+      });
+    }
 
     // Validation
     if (!username || !email || !password || !name) {
