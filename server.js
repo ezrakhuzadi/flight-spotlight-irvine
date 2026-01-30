@@ -1211,6 +1211,18 @@
     return false;
   }
 
+  function requiresOperatorForAtc(method, requestPath) {
+    if (method === "GET") return false;
+    if (method === "POST") {
+      // Compute-only endpoints (do not mutate ATC state).
+      if (requestPath === "/v1/routes/plan") return false;
+      if (requestPath === "/v1/compliance/evaluate") return false;
+      if (requestPath === "/v1/flights/plan") return false;
+      if (requestPath === "/v1/geofences/check-route") return false;
+    }
+    return true;
+  }
+
   function requiresAdminTokenForAtc(method, requestPath) {
     if (method === "GET") {
       if (requestPath === "/v1/drones" || requestPath.startsWith("/v1/drones/")) {
@@ -1255,6 +1267,10 @@
   function isAuthority(req) {
     const role = req.session.user?.role;
     return role === "authority" || role === "admin";
+  }
+
+  function isViewer(req) {
+    return req.session.user?.role === "viewer";
   }
 
   async function canAccessDrone(req, droneId) {
@@ -1337,6 +1353,9 @@
     const method = req.method.toUpperCase();
     if (!isAllowedAtcProxy(method, requestPath)) {
       return res.status(404).json({ message: "not_found" });
+    }
+    if (isViewer(req) && requiresOperatorForAtc(method, requestPath)) {
+      return res.status(403).json({ message: "insufficient_role" });
     }
     if (requiresAuthorityForAtc(method, requestPath) && !isAuthority(req)) {
       return res.status(403).json({ message: "insufficient_role" });
@@ -1523,6 +1542,9 @@
   });
 
   app.post("/api/blender/flight-declarations", requireAuth, async (req, res) => {
+    if (isViewer(req)) {
+      return res.status(403).json({ message: "insufficient_role" });
+    }
     if (!isAuthority(req)) {
       if (req.body?.aircraft_id) {
         const allowed = await canAccessDrone(req, req.body.aircraft_id);
@@ -1558,6 +1580,9 @@
   });
 
   app.delete("/api/blender/flight-declarations/:id", requireAuth, async (req, res) => {
+    if (isViewer(req)) {
+      return res.status(403).json({ message: "insufficient_role" });
+    }
     const declarationId = req.params.id;
     if (!declarationId) {
       return res.status(400).json({ message: "declaration_id_required" });

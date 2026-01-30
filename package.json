@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node tools/security-smoke.js"
+    "test": "node tools/security-smoke.js && node tools/rbac-smoke.js"
   },
   "keywords": [
     "3D",
