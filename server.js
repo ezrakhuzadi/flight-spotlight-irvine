@@ -484,7 +484,8 @@
         [
           "default-src 'self'",
           `script-src 'self' 'nonce-${nonce}'${needsCesiumUnsafeEval ? " 'unsafe-eval' blob:" : ""} https://dev.virtualearth.net`,
-          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          `style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com`,
+          "style-src-attr 'unsafe-inline'",
           "font-src 'self' https://fonts.gstatic.com data:",
           "img-src 'self' data: blob: https: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
           "connect-src 'self' https: ws: wss: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",

@@ -1,6 +1,6 @@
 <%- include('layouts/main', { title: 'Live Map' , activePage: 'map' , head: ` <!-- CesiumJS -->
     <script src="/assets/Build/Cesium/Cesium.js"></script>
-    <style>
+    <style nonce="${cspNonce}">
         @import url(/assets/Build/Cesium/Widgets/widgets.css);
 
         #cesiumContainer {
