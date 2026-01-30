@@ -1130,18 +1130,28 @@
     // Geofence Visualization
     // ========================================================================
 
+    function clearGeofences() {
+        for (const entity of geofenceEntities.values()) {
+            viewer.entities.remove(entity);
+        }
+        geofenceEntities.clear();
+    }
+
     async function fetchGeofences() {
         try {
             const response = await fetch(CONFIG.ATC_SERVER_URL + '/v1/geofences', {
                 credentials: 'same-origin'
             });
-            if (!response.ok) return;
+            if (!response.ok) {
+                clearGeofences();
+                return;
+            }
 
             const geofences = await response.json();
             renderGeofences(geofences);
 
         } catch (e) {
-            // Server might not be running
+            clearGeofences();
         }
     }
 
