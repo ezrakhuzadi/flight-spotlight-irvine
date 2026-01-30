@@ -1768,6 +1768,13 @@
             viewer.clock.currentTime = Cesium.JulianDate.fromDate(midnight);
             viewer.clock.shouldAnimate = false;
         }
+
+        ['realtime', 'day', 'night'].forEach((tod) => {
+            const btn = document.getElementById(`tod-${tod}-btn`);
+            if (btn) {
+                btn.classList.toggle('active', tod === mode);
+            }
+        });
     }
 
     // ========================================================================
@@ -1834,6 +1841,30 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         initViewer();
+
+        const cameraButtons = {
+            'cam-free-btn': 'free',
+            'cam-orbit-btn': 'orbit',
+            'cam-cockpit-btn': 'cockpit'
+        };
+        Object.entries(cameraButtons).forEach(([id, mode]) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', () => setCameraMode(mode));
+            }
+        });
+
+        const timeButtons = {
+            'tod-realtime-btn': 'realtime',
+            'tod-day-btn': 'day',
+            'tod-night-btn': 'night'
+        };
+        Object.entries(timeButtons).forEach(([id, mode]) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', () => setTimeOfDay(mode));
+            }
+        });
 
         // Command buttons
         const holdBtn = document.getElementById('btnHoldDrone');

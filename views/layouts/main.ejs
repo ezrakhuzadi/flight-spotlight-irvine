@@ -40,22 +40,22 @@
         <%- include('../partials/status-bar') %>
     </div>
     
-    <script nonce="<%= cspNonce %>">
-        window.APP_USER = <%- JSON.stringify(user || null) %>;
-        window.__CSRF_TOKEN__ = <%- JSON.stringify(csrfToken || '') %>;
-        window.__ATC_API_BASE__ = "<%= typeof atcApiBase !== 'undefined' ? atcApiBase : '' %>";
-        window.__ATC_WS_BASE__ = "<%= typeof atcWsBase !== 'undefined' ? atcWsBase : '' %>";
-        window.__ATC_WS_TOKEN__ = "<%= typeof atcWsToken !== 'undefined' ? atcWsToken : '' %>";
-        window.__ATC_COMPLIANCE_LIMITS__ = <%- JSON.stringify(typeof complianceLimits !== 'undefined' ? complianceLimits : {}) %>;
-        window.__ROUTE_ENGINE_CONFIG__ = <%- JSON.stringify(typeof routeEngineConfig !== 'undefined' ? routeEngineConfig : {}) %>;
-        window.__ROUTE_PLANNER_CONFIG__ = <%- JSON.stringify(typeof routePlannerConfig !== 'undefined' ? routePlannerConfig : {}) %>;
-        window.__CESIUM_CONFIG__ = {
-            ionToken: <%- JSON.stringify(cesiumIonToken || '') %>,
-            ionBaseImageryAssetId: <%- JSON.stringify(ionBaseImageryAssetId || null) %>,
-            google3dTilesAssetId: <%- JSON.stringify(google3dTilesAssetId || null) %>,
-            osmBuildingsAssetId: <%- JSON.stringify(osmBuildingsAssetId || null) %>
-        };
-    </script>
+	    <script nonce="<%= cspNonce %>">
+	        window.APP_USER = <%- safeJson(user || null) %>;
+	        window.__CSRF_TOKEN__ = <%- safeJson(csrfToken || '') %>;
+	        window.__ATC_API_BASE__ = <%- safeJson(typeof atcApiBase !== 'undefined' ? atcApiBase : '') %>;
+	        window.__ATC_WS_BASE__ = <%- safeJson(typeof atcWsBase !== 'undefined' ? atcWsBase : '') %>;
+	        window.__ATC_WS_TOKEN__ = <%- safeJson(typeof atcWsToken !== 'undefined' ? atcWsToken : '') %>;
+	        window.__ATC_COMPLIANCE_LIMITS__ = <%- safeJson(typeof complianceLimits !== 'undefined' ? complianceLimits : {}) %>;
+	        window.__ROUTE_ENGINE_CONFIG__ = <%- safeJson(typeof routeEngineConfig !== 'undefined' ? routeEngineConfig : {}) %>;
+	        window.__ROUTE_PLANNER_CONFIG__ = <%- safeJson(typeof routePlannerConfig !== 'undefined' ? routePlannerConfig : {}) %>;
+	        window.__CESIUM_CONFIG__ = {
+	            ionToken: <%- safeJson(cesiumIonToken || '') %>,
+	            ionBaseImageryAssetId: <%- safeJson(ionBaseImageryAssetId || null) %>,
+	            google3dTilesAssetId: <%- safeJson(google3dTilesAssetId || null) %>,
+	            osmBuildingsAssetId: <%- safeJson(osmBuildingsAssetId || null) %>
+	        };
+	    </script>
     <script nonce="<%= cspNonce %>">
         window.escapeHtml = window.escapeHtml || function (value) {
             return String(value ?? '')

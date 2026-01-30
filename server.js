@@ -190,6 +190,16 @@
     return Math.trunc(parsed);
   }
 
+  function safeJson(value) {
+    const normalized = value === undefined ? null : value;
+    return JSON.stringify(normalized)
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e")
+      .replace(/&/g, "\\u0026")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+  }
+
   function buildSeedUser(prefix, fallback) {
     const email = cleanEnv(process.env[`${prefix}_EMAIL`]);
     const password = cleanEnv(process.env[`${prefix}_PASSWORD`]);
@@ -430,6 +440,7 @@
   // Provide defaults even if a render bypasses res.locals middleware.
   app.locals.routeEngineConfig = ROUTE_ENGINE_CONFIG || {};
   app.locals.routePlannerConfig = ROUTE_PLANNER_CONFIG || {};
+  app.locals.safeJson = safeJson;
 
   app.use((req, res, next) => {
     const nonce = crypto.randomBytes(16).toString("base64");
@@ -457,7 +468,6 @@
         [
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://dev.virtualearth.net",
-          "script-src-attr 'unsafe-inline'",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com data:",
           "img-src 'self' data: blob: https: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",
@@ -474,8 +484,6 @@
         [
           "default-src 'self'",
           `script-src 'self' 'nonce-${nonce}'${needsCesiumUnsafeEval ? " 'unsafe-eval' blob:" : ""} https://dev.virtualearth.net`,
-          // UI templates use inline onclick handlers; allow attributes without enabling inline <script> globally.
-          "script-src-attr 'unsafe-inline'",
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com data:",
           "img-src 'self' data: blob: https: http://ecn.t0.tiles.virtualearth.net http://ecn.t1.tiles.virtualearth.net http://ecn.t2.tiles.virtualearth.net http://ecn.t3.tiles.virtualearth.net",

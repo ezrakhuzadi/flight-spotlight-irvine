@@ -722,6 +722,10 @@
     // ========================================================================
 
     document.addEventListener('DOMContentLoaded', () => {
+        const demoBtn = document.getElementById('ridDemoBtn');
+        if (demoBtn) {
+            demoBtn.addEventListener('click', startDemoTraffic);
+        }
         initViewer();
     });
 

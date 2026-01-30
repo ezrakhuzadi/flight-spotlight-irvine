@@ -96,14 +96,11 @@
                 </div>
 
                 <!-- Filter -->
-                <div class="flex gap-sm mb-md">
-                    <button class="btn btn-ghost btn-sm active" data-filter="all"
-                        onclick="GeofenceControl.filter('all')">All</button>
-                    <button class="btn btn-ghost btn-sm" data-filter="no_fly"
-                        onclick="GeofenceControl.filter('no_fly')">No-Fly</button>
-                    <button class="btn btn-ghost btn-sm" data-filter="restricted"
-                        onclick="GeofenceControl.filter('restricted')">Restricted</button>
-                </div>
+	                <div class="flex gap-sm mb-md">
+	                    <button class="btn btn-ghost btn-sm active" data-filter="all" type="button">All</button>
+	                    <button class="btn btn-ghost btn-sm" data-filter="no_fly" type="button">No-Fly</button>
+	                    <button class="btn btn-ghost btn-sm" data-filter="restricted" type="button">Restricted</button>
+	                </div>
 
                 <!-- Geofence List -->
                 <div class="section-subtitle">Active Geofences</div>
@@ -119,14 +116,14 @@
         <div class="geofence-map-container">
             <div id="cesiumContainer"></div>
 
-            <!-- Controls Overlay -->
-            <div class="map-controls-overlay">
-                <div class="control-group">
-                    <button class="btn btn-ghost btn-sm" onclick="GeofenceControl.reset()">Reset View</button>
-                </div>
-            </div>
-        </div>
-    </div>
+	            <!-- Controls Overlay -->
+	            <div class="map-controls-overlay">
+	                <div class="control-group">
+	                    <button class="btn btn-ghost btn-sm" id="geofenceResetBtn" type="button">Reset View</button>
+	                </div>
+	            </div>
+	        </div>
+	    </div>
     `,
     scripts: `
     <script src="/assets/js/geofences.js"></script>

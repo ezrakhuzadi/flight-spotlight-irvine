@@ -1,22 +1,31 @@
+<%
+    const escapeHtml = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const safeMissionId = escapeHtml(missionId);
+%>
 <%- include('layouts/main', { title: 'Mission Detail' , activePage: 'missions' , head: ` <script src="/assets/Build/Cesium/Cesium.js"></script>
-    <style>
-        @import url(/assets/Build/Cesium/Widgets/widgets.css);
+	    <style>
+	        @import url(/assets/Build/Cesium/Widgets/widgets.css);
 
-        #missionDetailMap {
-            width: 100%;
-            height: 520px;
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            background: var(--bg-primary);
-        }
-    </style>
-    `, body: ` <div class="content-area" id="missionDetail" data-mission-id="${missionId}">
-    <!-- Page Header -->
-    <div class="section-header">
-        <div>
-            <h1 class="page-title">Mission: <span id="missionName">--</span></h1>
-            <p class="page-subtitle">View mission details and status</p>
-        </div>
+	        #missionDetailMap {
+	            width: 100%;
+	            height: 520px;
+	            border-radius: var(--radius-lg);
+	            overflow: hidden;
+	            background: var(--bg-primary);
+	        }
+	    </style>
+	    `, body: ` <div class="content-area" id="missionDetail" data-mission-id="${safeMissionId}">
+	    <!-- Page Header -->
+	    <div class="section-header">
+	        <div>
+	            <h1 class="page-title">Mission: <span id="missionName">--</span></h1>
+	            <p class="page-subtitle">View mission details and status</p>
+	        </div>
         <div class="flex gap-sm">
             <button class="btn btn-warning" id="abortMission">Abort Mission</button>
             <button class="btn btn-ghost" id="updateAtcSlot" style="display: none;">Update ATC Slot</button>

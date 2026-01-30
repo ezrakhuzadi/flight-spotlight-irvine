@@ -234,8 +234,9 @@
                 : '';
             const detailsHref = missionIdText ? `/control/missions/${encodeURIComponent(missionIdText)}` : '';
             const detailsButton = missionIdText
-                ? `<button class="btn btn-ghost btn-sm" onclick="window.location.href='${detailsHref}'">Details</button>`
+                ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(detailsHref)}">Details</a>`
                 : '';
+            const trackHref = `/control/map?track=${encodeURIComponent(mission.aircraft_id || '')}`;
             return `
                 <div class="list-item">
                     <span class="status-dot ${type === 'active' ? 'flying' : 'idle'}"></span>
@@ -254,9 +255,7 @@
                     <div class="list-item-actions">
                         ${detailsButton}
                         ${type === 'active' ? `
-                            <button class="btn btn-ghost btn-sm" onclick="window.location.href='/control/map?track=${encodeURIComponent(mission.aircraft_id || '')}'">
-                                Track
-                            </button>
+                            <a class="btn btn-ghost btn-sm" href="${escapeHtml(trackHref)}">Track</a>
                         ` : ''}
                     </div>
                 </div>

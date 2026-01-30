@@ -9,7 +9,8 @@
     "url": "https://www.openutm.net/"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tools/security-smoke.js"
   },
   "keywords": [
     "3D",

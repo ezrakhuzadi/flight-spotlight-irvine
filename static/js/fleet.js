@@ -161,12 +161,12 @@
                     <div class="section-subtitle">Status</div>
                     <div class="flex items-center gap-sm mb-md">
                         <span class="status-dot ${getStatusClass(drone.status)}"></span>
-                        <span class="status-badge ${getStatusClass(drone.status)}">${statusLabel}</span>
+                        <span class="status-badge ${getStatusClass(drone.status)}">${escapeHtml(statusLabel)}</span>
                     </div>
 
                     <div class="section-subtitle">Conformance</div>
                     <div class="flex items-center gap-sm mb-md">
-                        <span class="status-badge ${conformanceClass}">${conformanceStatus}</span>
+                        <span class="status-badge ${conformanceClass}">${escapeHtml(conformanceStatus)}</span>
                     </div>
                     
                     <div class="section-subtitle">Position</div>
@@ -180,14 +180,27 @@
                     
                     <div class="section-subtitle">Commands</div>
                     <div class="flex gap-sm">
-                        <button class="btn btn-warning btn-sm" onclick="Fleet.holdDrone('${droneId}')">
+                        <button class="btn btn-warning btn-sm" id="holdDroneBtn" type="button">
                             HOLD
                         </button>
-                        <button class="btn btn-success btn-sm" onclick="Fleet.resumeDrone('${droneId}')">
+                        <button class="btn btn-success btn-sm" id="resumeDroneBtn" type="button">
                             RESUME
                         </button>
                     </div>
                 `;
+
+                const holdBtn = contentEl.querySelector('#holdDroneBtn');
+                if (holdBtn) {
+                    holdBtn.addEventListener('click', () => {
+                        holdDrone(droneId);
+                    });
+                }
+                const resumeBtn = contentEl.querySelector('#resumeDroneBtn');
+                if (resumeBtn) {
+                    resumeBtn.addEventListener('click', () => {
+                        resumeDrone(droneId);
+                    });
+                }
             }
         });
     }

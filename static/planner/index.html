@@ -873,35 +873,35 @@
                         <span>Plan Your Route</span>
                     </div>
 
-                    <div id="routeInputs" class="route-inputs">
-                        <!-- Start Location -->
-                        <div class="route-input-row" data-index="0">
-                            <span class="route-marker start">A</span>
-                            <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
-                            <div class="route-input-wrapper">
-                                <input type="text" class="route-input" placeholder="Start: Address or coordinates"
-                                    data-type="start" autocomplete="off">
-                                <div class="autocomplete-dropdown"></div>
-                            </div>
-                            <button class="route-remove-btn" onclick="clearSingleInput(this)" title="Clear">x</button>
-                        </div>
+	                    <div id="routeInputs" class="route-inputs">
+	                        <!-- Start Location -->
+	                        <div class="route-input-row" data-index="0">
+	                            <span class="route-marker start">A</span>
+	                            <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
+	                            <div class="route-input-wrapper">
+	                                <input type="text" class="route-input" placeholder="Start: Address or coordinates"
+	                                    data-type="start" autocomplete="off">
+	                                <div class="autocomplete-dropdown"></div>
+	                            </div>
+	                            <button class="route-remove-btn" data-action="clear-input" type="button" title="Clear">x</button>
+	                        </div>
 
                         <!-- Destination -->
-                        <div class="route-input-row" data-index="1">
-                            <span class="route-marker end"><span>B</span></span>
-                            <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
-                            <div class="route-input-wrapper">
-                                <input type="text" class="route-input" placeholder="Destination: Address or coordinates"
-                                    data-type="end" autocomplete="off">
-                                <div class="autocomplete-dropdown"></div>
-                            </div>
-                            <button class="route-remove-btn" onclick="clearSingleInput(this)" title="Clear">x</button>
-                        </div>
-                    </div>
+	                        <div class="route-input-row" data-index="1">
+	                            <span class="route-marker end"><span>B</span></span>
+	                            <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
+	                            <div class="route-input-wrapper">
+	                                <input type="text" class="route-input" placeholder="Destination: Address or coordinates"
+	                                    data-type="end" autocomplete="off">
+	                                <div class="autocomplete-dropdown"></div>
+	                            </div>
+	                            <button class="route-remove-btn" data-action="clear-input" type="button" title="Clear">x</button>
+	                        </div>
+	                    </div>
 
-                    <button class="add-stop-btn" onclick="addStopInput()">
-                        + Add stop
-                    </button>
+	                    <button class="add-stop-btn" id="addStopBtn" type="button">
+	                        + Add stop
+	                    </button>
 
                     <div class="btn-group" style="margin-top: 12px;">
                         <button id="clearBtn" class="btn btn-danger" disabled>
@@ -1013,20 +1013,20 @@
                 </div>
             </div>
 
-            <div class="orbit-axis">
-                <div class="orbit-axis-label">Orbit Axis</div>
-                <div class="orbit-axis-grid">
-                    <button class="orbit-axis-btn" title="Pitch up" onclick="PlannerCamera.nudgeOrbit('up')">^</button>
-                    <div></div>
-                    <button class="orbit-axis-btn" title="Zoom in" onclick="PlannerCamera.nudgeOrbit('zoom-in')">+</button>
-                    <button class="orbit-axis-btn" title="Yaw left" onclick="PlannerCamera.nudgeOrbit('left')">&lt;</button>
-                    <button class="orbit-axis-btn" title="Reset view" onclick="PlannerCamera.nudgeOrbit('reset')">0</button>
-                    <button class="orbit-axis-btn" title="Yaw right" onclick="PlannerCamera.nudgeOrbit('right')">&gt;</button>
-                    <button class="orbit-axis-btn" title="Pitch down" onclick="PlannerCamera.nudgeOrbit('down')">v</button>
-                    <div></div>
-                    <button class="orbit-axis-btn" title="Zoom out" onclick="PlannerCamera.nudgeOrbit('zoom-out')">-</button>
-                </div>
-            </div>
+	            <div class="orbit-axis">
+	                <div class="orbit-axis-label">Orbit Axis</div>
+	                <div class="orbit-axis-grid">
+	                    <button class="orbit-axis-btn" title="Pitch up" data-nudge="up" type="button">^</button>
+	                    <div></div>
+	                    <button class="orbit-axis-btn" title="Zoom in" data-nudge="zoom-in" type="button">+</button>
+	                    <button class="orbit-axis-btn" title="Yaw left" data-nudge="left" type="button">&lt;</button>
+	                    <button class="orbit-axis-btn" title="Reset view" data-nudge="reset" type="button">0</button>
+	                    <button class="orbit-axis-btn" title="Yaw right" data-nudge="right" type="button">&gt;</button>
+	                    <button class="orbit-axis-btn" title="Pitch down" data-nudge="down" type="button">v</button>
+	                    <div></div>
+	                    <button class="orbit-axis-btn" title="Zoom out" data-nudge="zoom-out" type="button">-</button>
+	                </div>
+	            </div>
         </main>
     </div>
 
@@ -1486,24 +1486,32 @@
             if (refreshDronesBtn) refreshDronesBtn.disabled = true;
             if (droneSelectHint) droneSelectHint.textContent = 'Loading registered drones...';
 
-            try {
-                const drones = await window.FlightPlanner.listDrones();
-                const options = [`<option value="">Auto (Planner ID)</option>`];
+	            try {
+	                const drones = await window.FlightPlanner.listDrones();
+	                droneSelect.replaceChildren();
+	                const defaultOption = document.createElement('option');
+	                defaultOption.value = '';
+	                defaultOption.textContent = 'Auto (Planner ID)';
+	                droneSelect.appendChild(defaultOption);
 
-                (drones || []).forEach((drone) => {
-                    const id = drone?.drone_id || '';
-                    if (!id) return;
-                    const status = drone?.status ? ` (${String(drone.status).toLowerCase()})` : '';
-                    options.push(`<option value="${id}">${id}${status}</option>`);
-                });
+	                (drones || []).forEach((drone) => {
+	                    const id = drone?.drone_id || '';
+	                    if (!id) return;
+	                    const status = drone?.status ? ` (${String(drone.status).toLowerCase()})` : '';
+	                    const option = document.createElement('option');
+	                    option.value = id;
+	                    option.textContent = `${id}${status}`;
+	                    droneSelect.appendChild(option);
+	                });
 
-                droneSelect.innerHTML = options.join('');
+	                if (previous) {
+	                    droneSelect.value = previous;
+	                    if (droneSelect.value !== previous) {
+	                        droneSelect.value = '';
+	                    }
+	                }
 
-                if (previous && droneSelect.querySelector(`option[value="${previous}"]`)) {
-                    droneSelect.value = previous;
-                }
-
-                applyDroneSelection();
+	                applyDroneSelection();
 
                 if (!drones || drones.length === 0) {
                     if (droneSelectHint) {
@@ -1534,15 +1542,15 @@
         // Google Maps-Style Route Planner with Autocomplete
         // ========================================================================
 
-        let stopCounter = 0;
-        let routeInputData = new Map();
-        let activeInput = null;
-        let autocompleteService = null;
-        let suppressWaypointSync = false;
-        let draggingRow = null;
-        let dragGhost = null;
-        let resyncInFlight = false;
-        let resyncQueued = false;
+	        let routeInputData = new Map();
+	        let activeInput = null;
+	        let autocompleteService = null;
+	        const autocompleteResultsByDropdown = new WeakMap();
+	        let suppressWaypointSync = false;
+	        let draggingRow = null;
+	        let dragGhost = null;
+	        let resyncInFlight = false;
+	        let resyncQueued = false;
 
         /**
          * AutocompleteService - Handles Cesium Ion geocoding with debounce
@@ -1597,40 +1605,55 @@
         /**
          * Show autocomplete dropdown
          */
-        function showAutocomplete(input, results) {
-            const wrapper = input.closest('.route-input-wrapper');
-            const dropdown = wrapper.querySelector('.autocomplete-dropdown');
+	        function showAutocomplete(input, results) {
+	            const wrapper = input.closest('.route-input-wrapper');
+	            const dropdown = wrapper?.querySelector?.('.autocomplete-dropdown');
+	            if (!dropdown) return;
 
-            if (!results || results.length === 0) {
-                dropdown.innerHTML = '<div class="autocomplete-empty">No results found</div>';
-                dropdown.classList.add('show');
-                return;
-            }
+	            if (!results || results.length === 0) {
+	                dropdown.replaceChildren();
+	                const empty = document.createElement('div');
+	                empty.className = 'autocomplete-empty';
+	                empty.textContent = 'No results found';
+	                dropdown.appendChild(empty);
+	                dropdown.classList.add('show');
+	                return;
+	            }
 
-            dropdown.innerHTML = results.map((r, i) => {
-                const name = r.displayName.split(',')[0];
-                const address = r.displayName.split(',').slice(1).join(',').trim();
-                return `
-                    <div class="autocomplete-item" data-index="${i}">
-                        <div class="place-name">${name}</div>
-                        ${address ? `<div class="place-address">${address}</div>` : ''}
-                    </div>
-                `;
-            }).join('');
+	            dropdown.replaceChildren();
+	            autocompleteResultsByDropdown.set(dropdown, results);
+	            dropdown.classList.add('show');
 
-            // Store results for click handler
-            dropdown.dataset.results = JSON.stringify(results);
-            dropdown.classList.add('show');
+	            // Add click handlers
+	            results.forEach((result, i) => {
+	                const item = document.createElement('div');
+	                item.className = 'autocomplete-item';
+	                item.dataset.index = String(i);
 
-            // Add click handlers
-            dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const idx = parseInt(item.dataset.index);
-                    const storedResults = JSON.parse(dropdown.dataset.results);
-                    selectAutocompleteResult(input, storedResults[idx]);
-                });
-            });
-        }
+	                const displayName = typeof result?.displayName === 'string' ? result.displayName : '';
+	                const name = displayName.split(',')[0];
+	                const address = displayName.split(',').slice(1).join(',').trim();
+
+	                const nameEl = document.createElement('div');
+	                nameEl.className = 'place-name';
+	                nameEl.textContent = name;
+	                item.appendChild(nameEl);
+
+	                if (address) {
+	                    const addrEl = document.createElement('div');
+	                    addrEl.className = 'place-address';
+	                    addrEl.textContent = address;
+	                    item.appendChild(addrEl);
+	                }
+
+	                item.addEventListener('click', () => {
+	                    const stored = autocompleteResultsByDropdown.get(dropdown) || [];
+	                    selectAutocompleteResult(input, stored[i]);
+	                });
+
+	                dropdown.appendChild(item);
+	            });
+	        }
 
         function hideAutocomplete(input) {
             const wrapper = input.closest('.route-input-wrapper');
@@ -1691,17 +1714,11 @@
             input.addEventListener('input', (e) => {
                 const query = e.target.value.trim();
                 const existingData = routeInputData.get(input);
-                const row = input.closest('.route-input-row');
-                const isStopRow = input.dataset.type === 'stop';
 
                 if (!query) {
                     input.classList.remove('resolved', 'error');
                     if (existingData) {
                         routeInputData.delete(input);
-                    }
-                    if (isStopRow && row) {
-                        row.remove();
-                        updateMarkerLabels();
                     }
                     resetRouteState();
                     void resyncWaypointsFromInputs();
@@ -1859,33 +1876,100 @@
             return label;
         }
 
+        function applyRouteRowType(row, type, label) {
+            if (!row) return;
+            const marker = row.querySelector('.route-marker');
+            const input = row.querySelector('.route-input');
+            const btn = row.querySelector('.route-remove-btn');
+            const labelText = label || '?';
+
+	            if (marker) {
+	                if (type === 'end') {
+	                    marker.className = 'route-marker end';
+	                    const span = document.createElement('span');
+	                    span.textContent = labelText;
+	                    marker.replaceChildren(span);
+	                } else if (type === 'start') {
+	                    marker.className = 'route-marker start';
+	                    marker.textContent = labelText;
+	                } else {
+                    marker.className = 'route-marker stop';
+                    marker.textContent = labelText;
+                }
+            }
+
+            if (input) {
+                input.dataset.type = type;
+                if (type === 'start') {
+                    input.placeholder = 'Start: Address or coordinates';
+                } else if (type === 'end') {
+                    input.placeholder = 'Destination: Address or coordinates';
+                } else {
+                    input.placeholder = 'Stop: Address or coordinates';
+                }
+            }
+
+	            if (btn) {
+	                if (type === 'stop') {
+	                    btn.dataset.action = 'remove-stop';
+	                    btn.title = 'Remove';
+	                } else {
+	                    btn.dataset.action = 'clear-input';
+	                    btn.title = 'Clear';
+	                }
+	            }
+	        }
+
+	        function createEndInputRow() {
+	            const row = document.createElement('div');
+	            row.className = 'route-input-row';
+	            row.innerHTML = `
+	                <span class="route-marker end"><span>?</span></span>
+	                <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
+	                <div class="route-input-wrapper">
+	                    <input type="text" class="route-input" placeholder="Destination: Address or coordinates" data-type="end" autocomplete="off">
+	                    <div class="autocomplete-dropdown"></div>
+	                </div>
+	                <button class="route-remove-btn" data-action="clear-input" type="button" title="Clear">x</button>
+	            `;
+	            return row;
+	        }
+
+	        function createStopInputRow() {
+	            const row = document.createElement('div');
+	            row.className = 'route-input-row';
+	            row.innerHTML = `
+	                <span class="route-marker stop">?</span>
+	                <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
+	                <div class="route-input-wrapper">
+	                    <input type="text" class="route-input" placeholder="Stop: Address or coordinates" data-type="stop" autocomplete="off">
+	                    <div class="autocomplete-dropdown"></div>
+	                </div>
+	                <button class="route-remove-btn" data-action="remove-stop" type="button" title="Remove">x</button>
+	            `;
+	            return row;
+	        }
+
         function addStopInput(options = {}) {
             const { focus = true } = options;
-            stopCounter++;
             const routeInputs = document.getElementById('routeInputs');
-            const endRow = routeInputs.querySelector('[data-type="end"]')?.closest('.route-input-row');
-            const stopRow = document.createElement('div');
-            stopRow.className = 'route-input-row';
-            stopRow.innerHTML = `
-                <span class="route-marker stop">${stopCounter}</span>
-                <button type="button" class="route-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
-                <div class="route-input-wrapper">
-                    <input type="text" class="route-input" placeholder="Stop: Address or coordinates" data-type="stop" autocomplete="off">
-                    <div class="autocomplete-dropdown"></div>
-                </div>
-                <button class="route-remove-btn" onclick="removeStopInput(this)" title="Remove">x</button>
-            `;
-            if (endRow) routeInputs.insertBefore(stopRow, endRow);
-            else routeInputs.appendChild(stopRow);
+            const rows = Array.from(routeInputs.querySelectorAll('.route-input-row'));
+            if (rows.length < 2) return null;
 
-            const newInput = stopRow.querySelector('.route-input');
+            // Append a NEW destination row; the previous destination becomes a stop.
+            const previousEndRow = rows[rows.length - 1];
+            const newEndRow = createEndInputRow();
+            routeInputs.appendChild(newEndRow);
+
+            const newInput = newEndRow.querySelector('.route-input');
             setupInputAutocomplete(newInput);
-            setupRouteRowDrag(stopRow);
+            setupRouteRowDrag(newEndRow);
             if (focus) {
                 newInput.focus();
             }
             updateMarkerLabels();
-            return stopRow;
+            updateClearButtonState();
+            return previousEndRow;
         }
 
         async function removeStopInput(btn) {
@@ -1895,7 +1979,6 @@
             updateMarkerLabels();
             updateClearButtonState();
             resetRouteState();
-            FlightPlanner.clearWaypoints(); // Re-sync with map
             await resyncWaypointsFromInputs();
         }
 
@@ -1905,12 +1988,14 @@
         async function clearSingleInput(btn) {
             const row = btn.closest('.route-input-row');
             const input = row.querySelector('.route-input');
+            if (input?.dataset?.type === 'stop') {
+                return removeStopInput(btn);
+            }
             input.value = '';
             input.classList.remove('resolved', 'error');
             routeInputData.delete(input);
             updateClearButtonState();
             resetRouteState();
-            FlightPlanner.clearWaypoints();
             await resyncWaypointsFromInputs();
         }
 
@@ -1946,21 +2031,13 @@
         function updateMarkerLabels() {
             const rows = document.querySelectorAll('.route-input-row');
             rows.forEach((row, idx) => {
-                const marker = row.querySelector('.route-marker');
-                const input = row.querySelector('.route-input');
                 const label = indexToAlphaLabel(idx + 1);
                 if (idx === 0) {
-                    marker.className = 'route-marker start';
-                    marker.innerHTML = label;
-                    input.dataset.type = 'start';
+                    applyRouteRowType(row, 'start', label);
                 } else if (idx === rows.length - 1) {
-                    marker.className = 'route-marker end';
-                    marker.innerHTML = `<span>${label}</span>`;
-                    input.dataset.type = 'end';
+                    applyRouteRowType(row, 'end', label);
                 } else {
-                    marker.className = 'route-marker stop';
-                    marker.innerHTML = label;
-                    input.dataset.type = 'stop';
+                    applyRouteRowType(row, 'stop', label);
                 }
             });
         }
@@ -2094,7 +2171,6 @@
                 stopRows.push(newRow);
             }
 
-            stopCounter = stopRows.length;
         }
 
         function syncRouteInputsToWaypoints(waypoints) {
@@ -2161,7 +2237,6 @@
                     input.classList.remove('resolved', 'error');
                 }
             });
-            stopCounter = 0;
             updateMarkerLabels();
             updateClearButtonState();
             resetRouteState();
@@ -2195,7 +2270,6 @@
                 }
             });
 
-            stopCounter = 0;
             updateMarkerLabels();
             updateClearButtonState();
 
@@ -2251,13 +2325,41 @@
                 default:
                     break;
             }
-        }
+	        }
 
-        window.PlannerCamera = { nudgeOrbit };
+	        window.PlannerCamera = { nudgeOrbit };
 
-        // ========================================================================
-        // Initialization
-        // ========================================================================
+	        const addStopBtn = document.getElementById('addStopBtn');
+	        if (addStopBtn) {
+	            addStopBtn.addEventListener('click', () => addStopInput());
+	        }
+
+	        const routeInputs = document.getElementById('routeInputs');
+	        if (routeInputs) {
+	            routeInputs.addEventListener('click', (event) => {
+	                const btn = event.target?.closest?.('.route-remove-btn');
+	                if (!btn) return;
+	                const action = btn.dataset.action || '';
+	                if (action === 'remove-stop') {
+	                    void removeStopInput(btn);
+	                } else {
+	                    void clearSingleInput(btn);
+	                }
+	            });
+	        }
+
+	        document.querySelectorAll('.orbit-axis-btn[data-nudge]').forEach((btn) => {
+	            btn.addEventListener('click', () => {
+	                const action = btn.dataset.nudge || '';
+	                if (action) {
+	                    nudgeOrbit(action);
+	                }
+	            });
+	        });
+
+	        // ========================================================================
+	        // Initialization
+	        // ========================================================================
 
         async function init() {
             try {

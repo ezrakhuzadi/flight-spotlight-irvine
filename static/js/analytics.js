@@ -42,6 +42,11 @@
             });
         }
 
+        const exportBtn = document.getElementById('exportReportBtn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', exportReport);
+        }
+
         refreshAnalytics();
     });
 

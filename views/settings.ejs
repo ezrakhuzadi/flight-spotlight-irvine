@@ -167,12 +167,11 @@
                                         <span class="detail-label">Refresh Rate</span>
                                         <span class="detail-value">1000ms</span>
                                     </div>
-                                    <div class="mt-md">
-                                        <button class="btn btn-ghost" onclick="testConnection()">Test
-                                            Connection</button>
-                                    </div>
-                                </div>
-                            </div>
+	                                    <div class="mt-md">
+	                                        <button class="btn btn-ghost" id="testConnectionBtn" type="button">Test Connection</button>
+	                                    </div>
+	                                </div>
+	                            </div>
 
                             <!-- Safety Settings -->
                             <div class="card mb-md">
@@ -257,14 +256,18 @@
 
     <script src="/assets/js/api-client.js"></script>
     <script nonce="<%= cspNonce %>">
-        document.addEventListener('DOMContentLoaded', function () {
-            const params = new URLSearchParams(window.location.search);
-            const container = document.getElementById('messageContainer');
+	        document.addEventListener('DOMContentLoaded', function () {
+	            const params = new URLSearchParams(window.location.search);
+	            const container = document.getElementById('messageContainer');
+	            const testBtn = document.getElementById('testConnectionBtn');
+	            if (testBtn) {
+	                testBtn.addEventListener('click', testConnection);
+	            }
 
-            if (params.get('updated') === 'profile') {
-                container.innerHTML = '<div class="alert alert-success mb-md">Profile updated successfully!</div>';
-            } else if (params.get('updated') === 'password') {
-                container.innerHTML = '<div class="alert alert-success mb-md">Password changed!</div>';
+	            if (params.get('updated') === 'profile') {
+	                container.innerHTML = '<div class="alert alert-success mb-md">Profile updated successfully!</div>';
+	            } else if (params.get('updated') === 'password') {
+	                container.innerHTML = '<div class="alert alert-success mb-md">Password changed!</div>';
             } else if (params.get('error') === 'wrong_password') {
                 container.innerHTML = '<div class="alert alert-danger mb-md">Current password is incorrect.</div>';
             } else if (params.get('error') === 'password_mismatch') {

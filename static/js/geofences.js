@@ -418,6 +418,18 @@
     // ========================================================================
 
     document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('button[data-filter]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const filterType = btn.dataset.filter;
+                if (filterType) {
+                    filterGeofences(filterType);
+                }
+            });
+        });
+        const resetBtn = document.getElementById('geofenceResetBtn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', resetView);
+        }
         initViewer().then(loadGeofences);
     });
 
