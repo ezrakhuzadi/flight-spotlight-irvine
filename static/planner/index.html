@@ -1381,13 +1381,6 @@
             updateValidationUI(routeData);
         }
 
-        // Callback when waypoints are cleared
-        window.onWaypointsCleared = function () {
-            updateWaypointList([]);
-            currentRouteData = null;
-            updateValidationUI(null);
-        };
-
         // Callback when route is calculated
         window.onRouteCalculated = function (result) {
             currentRouteData = result;
