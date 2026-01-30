@@ -92,7 +92,7 @@ async function waitForServer(port, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await request({ port, method: "GET", path: "/csrf" });
+      const res = await request({ port, method: "GET", path: "/login" });
       if (res.status === 200) return;
     } catch (_) {
       // ignore
@@ -108,6 +108,12 @@ function parseJson(body, label) {
   } catch (error) {
     throw new Error(`${label} returned non-JSON body`);
   }
+}
+
+function extractCsrfFromHtml(body) {
+  const text = typeof body === "string" ? body : "";
+  const match = text.match(/name=\"_csrf\" value=\"([a-f0-9]+)\"/i);
+  return match ? match[1] : "";
 }
 
 function assert(condition, message) {
@@ -148,12 +154,12 @@ async function main() {
 
     const jar = new CookieJar();
 
-    // Establish anonymous session + CSRF token
-    const csrfAnon = await request({ port, method: "GET", path: "/csrf" });
-    jar.update(csrfAnon.headers["set-cookie"]);
-    assert(csrfAnon.status === 200, "GET /csrf failed");
-    const anonToken = parseJson(csrfAnon.body, "GET /csrf").csrfToken;
-    assert(typeof anonToken === "string" && anonToken.length > 0, "missing csrfToken");
+    // Establish anonymous session + CSRF token via the login page.
+    const loginPage = await request({ port, method: "GET", path: "/login" });
+    jar.update(loginPage.headers["set-cookie"]);
+    assert(loginPage.status === 200, "GET /login failed");
+    const anonToken = extractCsrfFromHtml(loginPage.body);
+    assert(typeof anonToken === "string" && anonToken.length > 0, "missing csrfToken on login page");
 
     // Login as guest (viewer)
     const guestLogin = await request({
@@ -264,4 +270,3 @@ main().catch((error) => {
   process.stderr.write(`[FAIL] ${error.message}\n`);
   process.exit(1);
 });
-

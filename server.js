@@ -527,6 +527,8 @@
     throw new Error("SESSION_SECRET must be set in production.");
   }
   const sessionSecret = rawSessionSecret || crypto.randomBytes(32).toString("hex");
+  const sessionTtlSeconds = Math.max(60, parseOptionalInt(process.env.ATC_SESSION_TTL_SECONDS) ?? 24 * 60 * 60);
+  const sessionReapIntervalSeconds = Math.max(60, parseOptionalInt(process.env.ATC_SESSION_REAP_INTERVAL_SECONDS) ?? 60 * 60);
 
   let sessionStore;
   if (sessionRedisUrl) {
@@ -537,13 +539,15 @@
       console.error("[SESSION] Redis error:", err?.message || String(err));
     });
     await redisClient.connect();
-    sessionStore = new RedisStore({ client: redisClient, prefix: "atc-frontend:sess:" });
+    sessionStore = new RedisStore({ client: redisClient, prefix: "atc-frontend:sess:", ttl: sessionTtlSeconds });
     console.log("[SESSION] Using Redis session store");
   } else {
     const sessionPath = process.env.SESSION_STORE_PATH || path.join(__dirname, "data", "sessions");
     fs.mkdirSync(sessionPath, { recursive: true });
     sessionStore = new FileStore({
       path: sessionPath,
+      ttl: sessionTtlSeconds,
+      reapInterval: sessionReapIntervalSeconds,
       logFn: () => { }
     });
     console.log("[SESSION] Using file session store:", sessionPath);
@@ -558,7 +562,7 @@
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      maxAge: sessionTtlSeconds * 1000
     }
   });
   app.use(sessionMiddleware);
@@ -607,6 +611,9 @@
 
   // Provide a CSRF token for embedded/static apps (e.g., planner iframe).
   app.get("/csrf", (req, res) => {
+    if (!req.session?.user) {
+      return res.status(401).json({ csrfToken: "" });
+    }
     const token = ensureCsrfToken(req);
     res.json({ csrfToken: token || "" });
   });
