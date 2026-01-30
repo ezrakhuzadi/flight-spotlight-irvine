@@ -1654,9 +1654,60 @@
     }
   }
 
+  const wsOriginAllowlist = cleanEnv(process.env.ATC_WS_ALLOWED_ORIGINS)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  function parseHostHeader(hostHeader) {
+    if (typeof hostHeader !== "string" || !hostHeader.trim()) return null;
+    try {
+      const url = new URL(`http://${hostHeader.trim()}`);
+      return { hostname: url.hostname, port: url.port || "" };
+    } catch {
+      return null;
+    }
+  }
+
+  function isAllowedWsOrigin(req) {
+    const origin = req.headers.origin;
+    if (!origin) return !IS_PRODUCTION;
+
+    let originUrl;
+    try {
+      originUrl = new URL(origin);
+    } catch {
+      return false;
+    }
+
+    if (wsOriginAllowlist.length) {
+      return wsOriginAllowlist.includes(originUrl.origin);
+    }
+
+    const host = parseHostHeader(req.headers.host);
+    if (!host) return false;
+    if (originUrl.hostname.toLowerCase() !== host.hostname.toLowerCase()) return false;
+
+    if (host.port) {
+      const originPort = originUrl.port
+        || (originUrl.protocol === "https:" ? "443" : (originUrl.protocol === "http:" ? "80" : ""));
+      if (!originPort || originPort !== host.port) return false;
+    }
+
+    const forwardedProto = typeof req.headers["x-forwarded-proto"] === "string"
+      ? req.headers["x-forwarded-proto"].split(",")[0].trim()
+      : "";
+    if (forwardedProto) {
+      const expectedProto = `${forwardedProto.replace(/:$/, "")}:`;
+      if (originUrl.protocol !== expectedProto) return false;
+    }
+
+    return true;
+  }
+
   function buildAtcWsPath(user, clientUrl) {
     const params = new URLSearchParams();
-    const isAuthority = user?.role === "authority";
+    const isAuthority = user?.role === "authority" || user?.role === "admin";
     const requestedOwnerId = clientUrl.searchParams.get("owner_id");
     const ownerId = isAuthority ? requestedOwnerId : (user?.id || null);
     const droneId = clientUrl.searchParams.get("drone_id");
@@ -1675,6 +1726,11 @@
       return;
     }
     if (url.pathname !== atcWsProxyPath) {
+      rejectUpgrade(socket, 404, "Not Found");
+      return;
+    }
+    if (!isAllowedWsOrigin(req)) {
+      rejectUpgrade(socket, 403, "Forbidden");
       return;
     }
 
