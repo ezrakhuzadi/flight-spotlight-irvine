@@ -28,7 +28,7 @@
     let geofences = [];
     let activeFilter = 'all';
     const geofenceEntities = new Map();
-    const canManage = window.APP_USER && window.APP_USER.role === 'authority';
+    const canManage = window.APP_USER && (window.APP_USER.role === 'authority' || window.APP_USER.role === 'admin');
     let lastLoadError = null;
 
     // ========================================================================

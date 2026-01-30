@@ -69,7 +69,7 @@ router.get('/geofences/create', requireRole(['authority', 'admin']), (req, res) 
 // Conflicts
 // ============================================
 
-router.get('/conflicts', requireRole('authority'), (req, res) => {
+router.get('/conflicts', requireRole(['authority', 'admin']), (req, res) => {
     res.render('conflicts', { user: req.session.user });
 });
 
@@ -85,7 +85,7 @@ router.get('/remote-id', (req, res) => {
 // Analytics
 // ============================================
 
-router.get('/analytics', requireRole('authority'), (req, res) => {
+router.get('/analytics', requireRole(['authority', 'admin']), (req, res) => {
     res.render('analytics', { user: req.session.user });
 });
 

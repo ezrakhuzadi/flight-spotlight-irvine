@@ -22,6 +22,11 @@ const API = (function () {
         return SAFE_METHODS.has(value);
     }
 
+    function isAuthorityOrAdmin(user) {
+        if (!user) return false;
+        return user.role === 'authority' || user.role === 'admin';
+    }
+
     // State
     let lastUpdate = null;
     const ownerCache = new Map();
@@ -37,7 +42,7 @@ const API = (function () {
         if (ownerId !== null && ownerId !== undefined) return ownerId;
         if (typeof window === 'undefined') return null;
         const user = window.APP_USER;
-        if (!user || user.role === 'authority') return null;
+        if (!user || isAuthorityOrAdmin(user)) return null;
         return user.id || null;
     }
 
@@ -127,7 +132,7 @@ const API = (function () {
 
     function getOwnerContext() {
         const user = typeof window !== 'undefined' ? window.APP_USER : null;
-        if (!user || user.role === 'authority') return null;
+        if (!user || isAuthorityOrAdmin(user)) return null;
         const email = normalizeEmail(user.email || '');
         return { id: user.id || null, email: email || null };
     }
@@ -208,6 +213,7 @@ const API = (function () {
         };
         window.ATCUtils = {
             normalizeEmail,
+            isAuthorityOrAdmin,
             getOwnerContext,
             parseGeoJson,
             extractGeoJson,

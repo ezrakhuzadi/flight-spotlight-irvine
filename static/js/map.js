@@ -686,7 +686,7 @@
 
     function getOwnerFilterId() {
         const user = window.APP_USER;
-        if (!user || user.role === 'authority') return null;
+        if (!user || user.role === 'authority' || user.role === 'admin') return null;
         return user.id || null;
     }
 
