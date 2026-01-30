@@ -113,6 +113,13 @@
             color: var(--text-primary);
         }
 
+        .docs-content h4 {
+            font-size: 14px;
+            margin: 16px 0 8px 0;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
         .docs-content p {
             line-height: 1.7;
             color: var(--text-secondary);
@@ -263,6 +270,7 @@
                 <a href="#installation" class="docs-nav-link">MAVLink Gateway</a>
                 <a href="#mavlink-commands" class="docs-nav-link">Command Mapping</a>
                 <a href="#mavlink-troubleshooting" class="docs-nav-link">Troubleshooting</a>
+                <a href="#mavlink-verification" class="docs-nav-link">Verification</a>
                 <a href="#auth" class="docs-nav-link">Authentication</a>
             </div>
 
@@ -299,7 +307,7 @@
             </div>
 
             <div class="docs-nav-section">
-                <div class="docs-nav-title">Examples</div>
+                <div class="docs-nav-title">Rust SDK Examples</div>
                 <a href="#example-basic" class="docs-nav-link">Basic Drone</a>
                 <a href="#example-command-stream" class="docs-nav-link">Command Stream</a>
                 <a href="#example-flight-plan" class="docs-nav-link">Flight Plan</a>
@@ -317,7 +325,8 @@
                 <code class="code-inline">http://localhost:3000</code> for direct drone or service calls.<br>
                 <code class="code-inline">/api/atc</code> for Control Center same-origin proxy (browser clients).<br>
                 <code class="code-inline">ws://localhost:3000/v1/ws</code> for realtime telemetry streaming (use
-                <code class="code-inline">wss://</code> for TLS).
+                <code class="code-inline">wss://</code> for TLS).<br>
+                <strong>Note:</strong> <code class="code-inline">mavlink-gateway</code> should always use a direct backend URL (never <code class="code-inline">/api/atc</code>).
             </div>
 
             <div class="callout warning">
@@ -359,11 +368,20 @@ export MAVLINK_ENDPOINT="serial:/dev/ttyAMA0:57600"   # or udp:0.0.0.0:14550
 python3 main.py</pre>
             </div>
 
+            <div class="callout success">
+                <strong>Quick verification:</strong>
+                <ul>
+                    <li>Gateway log shows <code class="code-inline">heartbeat ok</code> (MAVLink connected)</li>
+                    <li>Control Center map shows <code class="code-inline">ATC_DRONE_ID</code> moving (telemetry accepted)</li>
+                    <li>Issuing <code class="code-inline">HOLD</code> from Control Center logs <code class="code-inline">HOLD -&gt; mode ...</code> (command delivery)</li>
+                </ul>
+            </div>
+
             <div class="callout warning">
                 <strong>Autopilot requirements:</strong> your autopilot must support a guided/offboard mode that accepts
                 position targets (typically <code class="code-inline">GUIDED</code> on ArduPilot, <code
                     class="code-inline">OFFBOARD</code> on PX4). The gateway does not “low-level fly” the drone; it only
-                sets targets and modes.
+                sets targets and modes. It does not arm/takeoff/land.
             </div>
 
             <h3 id="rust-quickstart">Rust SDK (advanced)</h3>
@@ -432,11 +450,19 @@ ATC_REGISTRATION_TOKEN=change-me-registration-token
 # MAVLink
 MAVLINK_ENDPOINT=serial:/dev/ttyAMA0:57600   # or udp:0.0.0.0:14550
 
+# TLS (optional)
+# ATC_SERVER_CA_CERT_PATH=/certs/ca.pem
+# ATC_TLS_INSECURE=1   # dev only; blocked in production
+
+# Logging
+LOG_LEVEL=INFO
+
 # Optional
 ATC_OWNER_ID=guest
 ATC_TELEMETRY_HZ=5
 ATC_COMMAND_POLL_HZ=2
-ATC_TARGET_REACHED_M=12</pre>
+ATC_TARGET_REACHED_M=12
+ATC_HTTP_TIMEOUT_S=5</pre>
             </div>
 
             <h3>Run</h3>
@@ -462,12 +488,12 @@ python3 main.py</pre>
             <h2 id="mavlink-commands">Command Mapping</h2>
             <p>ATC commands are translated into best-effort autopilot actions:</p>
             <ul>
-                <li><code class="code-inline">HOLD</code> → switch to a hold-like mode (tries LOITER/HOLD/POSHOLD/BRAKE)</li>
+                <li><code class="code-inline">HOLD</code> → switch to a hold-like mode (tries LOITER/HOLD/POSHOLD/BRAKE/ALT_HOLD)</li>
                 <li><code class="code-inline">RESUME</code> → return to previous mode or continue guided target</li>
                 <li><code class="code-inline">ALTITUDE_CHANGE</code> → set a guided target at current lat/lon with requested altitude</li>
                 <li><code class="code-inline">REROUTE</code> → switch to GUIDED/OFFBOARD and step through waypoint targets</li>
             </ul>
-            <p>Targets are sent using MAVLink <code class="code-inline">SET_POSITION_TARGET_GLOBAL_INT</code> (position + altitude).</p>
+            <p>Targets are sent using MAVLink <code class="code-inline">SET_POSITION_TARGET_GLOBAL_INT</code> (position + altitude) with frame <code class="code-inline">MAV_FRAME_GLOBAL_INT</code>.</p>
 
             <h2 id="mavlink-troubleshooting">Troubleshooting</h2>
             <ul>
@@ -475,6 +501,18 @@ python3 main.py</pre>
                 <li><strong>Telemetry but no control:</strong> autopilot may not support GUIDED/OFFBOARD or requires extra config to accept setpoints.</li>
                 <li><strong>Auth errors:</strong> verify <code class="code-inline">ATC_REGISTRATION_TOKEN</code> (or session token) matches the backend.</li>
             </ul>
+
+            <h2 id="mavlink-verification">Verification</h2>
+            <p>Use this checklist to confirm end-to-end behavior (autopilot ⇄ gateway ⇄ ATC):</p>
+            <ul>
+                <li><strong>Backend reachable:</strong> <code class="code-inline">curl -fsS http://your-atc-host:3000/ready</code></li>
+                <li><strong>MAVLink connected:</strong> gateway logs <code class="code-inline">heartbeat ok</code></li>
+                <li><strong>Telemetry visible:</strong> Control Center map shows <code class="code-inline">ATC_DRONE_ID</code> updating</li>
+                <li><strong>Commands applied:</strong> issue <code class="code-inline">HOLD</code>/<code class="code-inline">ALTITUDE_CHANGE</code> and watch gateway logs for mode/target updates</li>
+            </ul>
+            <div class="callout info">
+                <strong>Altitude note:</strong> The gateway reports altitude from MAVLink <code class="code-inline">GLOBAL_POSITION_INT.alt</code> (MSL). Position targets are sent using <code class="code-inline">SET_POSITION_TARGET_GLOBAL_INT</code> with frame <code class="code-inline">MAV_FRAME_GLOBAL_INT</code>.
+            </div>
 
             <h2 id="auth">Authentication</h2>
             <p>ATC uses short-lived tokens for drones and optional shared tokens for registration and WebSockets.</p>
