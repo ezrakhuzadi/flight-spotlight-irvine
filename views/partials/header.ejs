@@ -49,9 +49,12 @@
                 <span class="user-name">
                     <%= user.name %>
                 </span>
-                <a href="/logout" class="btn btn-ghost btn-sm" title="Logout">
-                    Logout
-                </a>
+                <form method="POST" action="/logout">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken || '' %>">
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Logout">
+                        Logout
+                    </button>
+                </form>
             </div>
             <% } %>
     </div>

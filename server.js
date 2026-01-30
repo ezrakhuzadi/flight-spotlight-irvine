@@ -640,6 +640,28 @@
   // Auth Routes
   // ========================================
 
+  function establishSession(req, res, user, redirectTo) {
+    const target = typeof redirectTo === "string" && redirectTo ? redirectTo : "/control";
+    const sessionUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt
+    };
+
+    req.session.regenerate((err) => {
+      if (err) {
+        console.error("[AUTH] Session regenerate failed:", err?.message || String(err));
+      }
+      req.session.user = sessionUser;
+      ensureCsrfToken(req);
+      userStore.touchLogin(user.id);
+      console.log(`[AUTH] User logged in: ${user.id}`);
+      return res.redirect(target);
+    });
+  }
+
   // Login page
   app.get('/login', (req, res) => {
     if (req.session.user) {
@@ -654,16 +676,7 @@
     const { username, password } = req.body;
     const user = userStore.getUserById(username);
     if (user && verifyPassword(user, password)) {
-      req.session.user = {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt
-      };
-      userStore.touchLogin(user.id);
-      console.log(`[AUTH] User logged in: ${user.id}`);
-      return res.redirect('/control');
+      return establishSession(req, res, user, "/control");
     }
 
     res.render('login', { error: 'Invalid username or password' });
@@ -681,16 +694,7 @@
           guestLoginEnabled: false
         });
       }
-      req.session.user = {
-        id: guest.id,
-        name: guest.name,
-        email: guest.email,
-        role: guest.role,
-        createdAt: guest.createdAt
-      };
-      userStore.touchLogin(guest.id);
-      console.log('[AUTH] Guest user logged in');
-      res.redirect('/control');
+      return establishSession(req, res, guest, "/control");
     });
   }
 
@@ -755,24 +759,22 @@
     console.log(`[AUTH] New user registered: ${username}`);
 
     // Auto-login after signup
-    req.session.user = {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      createdAt: newUser.createdAt
-    };
-    res.redirect('/control');
+    return establishSession(req, res, newUser, "/control");
   });
 
-  // Logout  
-  app.get('/logout', (req, res) => {
+  // Logout (POST + CSRF protected)
+  app.post('/logout', (req, res) => {
     const userId = req.session.user?.id;
     req.session.destroy((err) => {
       if (err) console.error('[AUTH] Logout error:', err);
       console.log(`[AUTH] User logged out: ${userId}`);
       res.redirect('/login');
     });
+  });
+
+  // Disallow logout-by-GET (CSRF-able)
+  app.get("/logout", (_req, res) => {
+    res.status(405).send("Method Not Allowed");
   });
 
   // ========================================
