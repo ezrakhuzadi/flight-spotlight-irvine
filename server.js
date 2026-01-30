@@ -35,6 +35,7 @@
   const PASSWORD_ALGO = "bcrypt";
   const PASSWORD_ROUNDS = Number(process.env.PASSWORD_ROUNDS || 10);
   const ALLOW_DEFAULT_USERS = process.env.ATC_ALLOW_DEFAULT_USERS === "1";
+  const ALLOW_UNOWNED_DRONES = process.env.ATC_ALLOW_UNOWNED_DRONES === "1";
   const CESIUM_ION_TOKEN = process.env.CESIUM_ION_TOKEN || "";
   const DEFAULT_ION_BASE_IMAGERY_ASSET_ID = 2; // Bing Maps Aerial
   const DEFAULT_GOOGLE_3D_TILES_ASSET_ID = 2275207; // Google Photorealistic 3D Tiles (Ion global asset)
@@ -51,6 +52,9 @@
 
   if (IS_PRODUCTION && ALLOW_DEFAULT_USERS) {
     throw new Error("[AUTH] ATC_ALLOW_DEFAULT_USERS=1 is not allowed in production.");
+  }
+  if (IS_PRODUCTION && ALLOW_UNOWNED_DRONES) {
+    throw new Error("[AUTH] ATC_ALLOW_UNOWNED_DRONES=1 is not allowed in production.");
   }
 
   let atcCaCert = null;
@@ -1176,6 +1180,47 @@
     ));
   }
 
+  function splitRawUrlPathAndQuery(rawUrl) {
+    const input = typeof rawUrl === "string" ? rawUrl : "";
+    const idx = input.indexOf("?");
+    if (idx === -1) {
+      return { path: input, query: "" };
+    }
+    return { path: input.slice(0, idx), query: input.slice(idx) };
+  }
+
+  function validateAtcProxyPath(rawPath) {
+    if (typeof rawPath !== "string") return null;
+    if (!rawPath.startsWith("/v1")) return null;
+
+    // Reject any percent-encoding to prevent encoded path separators bypassing allowlists.
+    if (rawPath.includes("%")) return null;
+    if (rawPath.includes("\\")) return null;
+    if (rawPath.includes("\0")) return null;
+
+    // Reject non-canonical paths: empty segments, dot segments, or double slashes.
+    const segments = rawPath.split("/").slice(1); // drop leading empty segment
+    if (segments.length === 0) return null;
+    for (const segment of segments) {
+      if (!segment) return null; // includes trailing slash and double slashes
+      if (segment === "." || segment === "..") return null;
+    }
+    return rawPath;
+  }
+
+  function getAtcProxyTarget(req) {
+    const original = typeof req.originalUrl === "string" ? req.originalUrl : "";
+    const prefix = typeof ATC_PROXY_BASE === "string" ? ATC_PROXY_BASE : "";
+    if (!prefix || !original.startsWith(prefix)) {
+      return null;
+    }
+    const suffix = original.slice(prefix.length);
+    const { path: rawPath, query } = splitRawUrlPathAndQuery(suffix);
+    const validatedPath = validateAtcProxyPath(rawPath);
+    if (!validatedPath) return null;
+    return { requestPath: validatedPath, url: `${validatedPath}${query}` };
+  }
+
   function resolveAtcProxyTimeoutMs(method, requestPath) {
     const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "";
     const rawPath = typeof requestPath === "string" ? requestPath : "";
@@ -1290,10 +1335,10 @@
       const drones = Array.isArray(response.data) ? response.data : [];
       const drone = drones.find(entry => entry.drone_id === droneId);
       if (!drone) {
-        return true;
+        return false;
       }
       if (!drone.owner_id) {
-        return true;
+        return ALLOW_UNOWNED_DRONES;
       }
       return drone.owner_id === req.session.user?.id;
     } catch (error) {
@@ -1345,11 +1390,11 @@
   }
 
   app.all(`${ATC_PROXY_BASE}/*`, requireAuth, async (req, res) => {
-    const targetPath = req.originalUrl.replace(ATC_PROXY_BASE, "");
-    const requestPath = req.path.startsWith(ATC_PROXY_BASE)
-      ? req.path.slice(ATC_PROXY_BASE.length)
-      : req.path;
-    const url = targetPath;
+    const target = getAtcProxyTarget(req);
+    if (!target) {
+      return res.status(400).json({ message: "invalid_path" });
+    }
+    const { requestPath, url } = target;
     const method = req.method.toUpperCase();
     if (!isAllowedAtcProxy(method, requestPath)) {
       return res.status(404).json({ message: "not_found" });
