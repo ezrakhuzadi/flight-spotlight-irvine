@@ -1334,6 +1334,10 @@
                 await window.FlightPlanner.refreshGeofences();
             } catch (error) {
                 console.warn('[Planner] Geofence overlay refresh failed:', error);
+                if (typeof window.FlightPlanner.renderGeofences === 'function') {
+                    window.FlightPlanner.renderGeofences([]);
+                }
+                showToast('ATC offline — geofence overlay may be stale (Blender TTL up to 6h).', 'error');
             }
         }
 

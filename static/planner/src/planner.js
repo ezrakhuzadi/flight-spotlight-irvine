@@ -72,6 +72,15 @@
         return '';
     }
 
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
     function resolveCsrfToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
         const metaToken = meta && typeof meta.content === 'string' ? meta.content.trim() : '';
@@ -624,10 +633,19 @@
         clearGeofenceEntities();
 
         (geofences || [])
-            .filter((geofence) => geofence && geofence.active)
+            .filter((geofence) => geofence && geofence.active !== false)
             .forEach((geofence) => {
                 const polygon = geofence.polygon || [];
                 if (polygon.length < 3) return;
+
+                const source = (geofence.source || 'local').toString();
+                const sourceLabel = source === 'blender' ? 'Blender' : 'Local';
+                const createdAtLabel = (() => {
+                    if (!geofence.created_at) return '--';
+                    const date = new Date(geofence.created_at);
+                    if (Number.isNaN(date.valueOf())) return String(geofence.created_at);
+                    return date.toLocaleString();
+                })();
 
                 const lower = Number.isFinite(geofence.lower_altitude_m)
                     ? geofence.lower_altitude_m
@@ -644,6 +662,8 @@
                 );
 
                 const polygonEntity = viewer.entities.add({
+                    id: `planner-geofence-${geofence.id || `${Math.random()}`}`,
+                    name: geofence.name || 'Geofence',
                     polygon: {
                         hierarchy: new Cesium.PolygonHierarchy(positions),
                         height: height,
@@ -652,7 +672,14 @@
                         outline: true,
                         outlineColor: Cesium.Color.fromCssColorString(style.outline),
                         outlineWidth: 2
-                    }
+                    },
+                    description: `
+                        <table class="cesium-infoBox-defaultTable">
+                            <tr><td>Source:</td><td>${escapeHtml(sourceLabel)}</td></tr>
+                            <tr><td>Created:</td><td>${escapeHtml(createdAtLabel)}</td></tr>
+                            <tr><td>Type:</td><td>${escapeHtml(geofence.geofence_type || 'geofence')}</td></tr>
+                        </table>
+                    `
                 });
 
                 const entities = [polygonEntity];
@@ -661,7 +688,7 @@
                     const labelEntity = viewer.entities.add({
                         position: Cesium.Cartesian3.fromDegrees(centroid.lon, centroid.lat, extrudedHeight + 5),
                         label: {
-                            text: geofence.name || 'Geofence',
+                            text: `${geofence.name || 'Geofence'}${source === 'blender' ? ' [B]' : ''}`,
                             font: '13px Inter, sans-serif',
                             fillColor: Cesium.Color.fromCssColorString(style.outline),
                             outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
@@ -703,6 +730,7 @@
             geofences = await refreshGeofences();
         } catch (error) {
             console.warn('[Planner] Failed to refresh geofences for routing:', error);
+            renderGeofences([]);
             geofences = [];
         }
 

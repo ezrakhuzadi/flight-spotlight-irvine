@@ -95,6 +95,9 @@
 
     // Geofences
     const geofenceEntities = new Map();  // geofenceId -> entity
+    let geofenceLastUpdatedAt = null;
+    let geofenceLastError = null;
+    let geofenceLastCounts = null;
 
     // Flight plans
     const flightPlans = new Map();       // droneId -> plan
@@ -1130,6 +1133,33 @@
     // Geofence Visualization
     // ========================================================================
 
+    function formatTimeShort(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.valueOf())) return '--';
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function updateGeofenceStatusPanel() {
+        const container = document.getElementById('geofenceStatusPanel');
+        if (!container) return;
+
+        if (geofenceLastError) {
+            container.innerHTML = `
+                <div class="status-badge warn" style="margin: 8px 0;">
+                    ${escapeHtml(geofenceLastError)}
+                </div>
+            `;
+            return;
+        }
+
+        const counts = geofenceLastCounts || { active: 0, local: 0, blender: 0 };
+        const updatedAt = geofenceLastUpdatedAt ? formatTimeShort(geofenceLastUpdatedAt) : '--';
+        container.innerHTML = `
+            <div class="status-badge online" style="margin: 8px 0;">
+                ${escapeHtml(`${counts.active} active (${counts.local} local, ${counts.blender} blender) — updated ${updatedAt}`)}
+            </div>
+        `;
+    }
+
     function clearGeofences() {
         for (const entity of geofenceEntities.values()) {
             viewer.entities.remove(entity);
@@ -1144,14 +1174,28 @@
             });
             if (!response.ok) {
                 clearGeofences();
+                geofenceLastError = 'ATC offline — geofences may be stale (Blender TTL up to 6h)';
+                geofenceLastUpdatedAt = null;
+                geofenceLastCounts = null;
+                updateGeofenceStatusPanel();
                 return;
             }
 
             const geofences = await response.json();
+            const active = (Array.isArray(geofences) ? geofences : []).filter((gf) => gf && gf.active !== false);
+            const blenderCount = active.filter((gf) => (gf.source || 'local') === 'blender').length;
+            geofenceLastCounts = { active: active.length, local: active.length - blenderCount, blender: blenderCount };
+            geofenceLastError = null;
+            geofenceLastUpdatedAt = new Date();
+            updateGeofenceStatusPanel();
             renderGeofences(geofences);
 
         } catch (e) {
             clearGeofences();
+            geofenceLastError = 'ATC offline — geofences may be stale (Blender TTL up to 6h)';
+            geofenceLastUpdatedAt = null;
+            geofenceLastCounts = null;
+            updateGeofenceStatusPanel();
         }
     }
 
@@ -1167,6 +1211,15 @@
 
         for (const geofence of geofences) {
             if (geofenceEntities.has(geofence.id)) continue;
+
+            const source = geofence.source || 'local';
+            const sourceLabel = source === 'blender' ? 'Blender' : 'Local';
+            const createdAtLabel = (() => {
+                if (!geofence.created_at) return '--';
+                const date = new Date(geofence.created_at);
+                if (Number.isNaN(date.valueOf())) return escapeHtml(String(geofence.created_at));
+                return escapeHtml(date.toLocaleString());
+            })();
 
             // Convert polygon to Cesium positions
             const positions = geofence.polygon.map(([lat, lon]) =>
@@ -1204,11 +1257,18 @@
                     outline: true,
                     outlineColor: outlineColor,
                     outlineWidth: 2
-                }
+                },
+                description: `
+                    <table class="cesium-infoBox-defaultTable">
+                        <tr><td>Source:</td><td>${escapeHtml(sourceLabel)}</td></tr>
+                        <tr><td>Created:</td><td>${createdAtLabel}</td></tr>
+                        <tr><td>Type:</td><td>${escapeHtml(geofence.geofence_type)}</td></tr>
+                    </table>
+                `
             });
 
             geofenceEntities.set(geofence.id, entity);
-            console.log(`[Map] Geofence: ${geofence.name} (${geofence.geofence_type})`);
+            console.log(`[Map] Geofence: ${geofence.name} (${geofence.geofence_type}, ${sourceLabel})`);
         }
     }
 

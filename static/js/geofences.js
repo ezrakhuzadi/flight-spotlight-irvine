@@ -152,6 +152,12 @@
         geofences.forEach((gf) => {
             const positions = gf.polygon.map(([lat, lon]) => [lon, lat]).flat();
             const colors = getGeofenceColors(gf.geofence_type);
+            const sourceLabel = formatSourceLabel(gf.source || 'local');
+            const createdAtLabel = (() => {
+                if (!gf.created_at) return '--';
+                const date = new Date(gf.created_at);
+                return Number.isNaN(date.valueOf()) ? String(gf.created_at) : date.toLocaleString();
+            })();
             const entity = viewer.entities.add({
                 id: gf.id,
                 name: gf.name,
@@ -167,6 +173,8 @@
                 },
                 description: `
                     <table class="cesium-infoBox-defaultTable">
+                        <tr><td>Source:</td><td>${escapeHtml(sourceLabel)}</td></tr>
+                        <tr><td>Created:</td><td>${escapeHtml(createdAtLabel)}</td></tr>
                         <tr><td>Type:</td><td>${formatTypeLabel(gf.geofence_type)}</td></tr>
                         <tr><td>Altitude:</td><td>${gf.lower_altitude_m || 0}m - ${gf.upper_altitude_m || 0}m AGL</td></tr>
                     </table>
@@ -187,16 +195,20 @@
     function updateStats() {
         const totalEl = document.getElementById('geofenceTotal');
         const noFlyEl = document.getElementById('geofenceNoFly');
+        const externalEl = document.getElementById('geofenceExternal');
         if (lastLoadError) {
             if (totalEl) totalEl.textContent = '--';
             if (noFlyEl) noFlyEl.textContent = '--';
+            if (externalEl) externalEl.textContent = '--';
             return;
         }
         const active = geofences.filter((gf) => gf.active !== false);
         const total = active.length;
         const noFly = active.filter((gf) => gf.geofence_type === 'no_fly_zone').length;
+        const external = active.filter((gf) => (gf.source || 'local') === 'blender').length;
         if (totalEl) totalEl.textContent = total.toString();
         if (noFlyEl) noFlyEl.textContent = noFly.toString();
+        if (externalEl) externalEl.textContent = external.toString();
     }
 
     function renderGeofenceList() {
@@ -226,7 +238,10 @@
             const colors = getGeofenceColors(gf.geofence_type);
             const label = formatTypeLabel(gf.geofence_type);
             const statusLabel = gf.active === false ? 'Inactive' : 'Active';
-            const actionButtons = canManage
+            const source = gf.source || 'local';
+            const sourceLabel = formatSourceLabel(source);
+            const isExternal = source === 'blender';
+            const actionButtons = (canManage && !isExternal)
                 ? `
                     <div class="flex gap-sm">
                         <button class="btn btn-ghost btn-sm" data-action="toggle" data-id="${escapeHtml(gf.id)}">
@@ -243,7 +258,7 @@
                     <span class="status-dot" style="background: ${colors.dot};"></span>
                     <div class="list-item-content">
                         <div class="list-item-title">${escapeHtml(gf.name)}</div>
-                        <div class="list-item-subtitle">${escapeHtml(label)} | ${escapeHtml(gf.lower_altitude_m || 0)}-${escapeHtml(gf.upper_altitude_m || 0)}m | ${escapeHtml(statusLabel)}</div>
+                        <div class="list-item-subtitle">${escapeHtml(label)} | ${escapeHtml(gf.lower_altitude_m || 0)}-${escapeHtml(gf.upper_altitude_m || 0)}m | ${escapeHtml(statusLabel)} | ${escapeHtml(sourceLabel)}</div>
                     </div>
                     ${actionButtons}
                 </div>
@@ -341,6 +356,16 @@
         }
     }
 
+    function formatSourceLabel(source) {
+        switch (String(source || '').toLowerCase()) {
+            case 'blender':
+                return 'Blender';
+            case 'local':
+            default:
+                return 'Local';
+        }
+    }
+
     function getGeofenceColors(type) {
         switch (type) {
             case 'no_fly_zone':
@@ -380,6 +405,7 @@
     async function toggleActive(id) {
         const target = geofences.find((gf) => gf.id === id);
         if (!target) return;
+        if ((target.source || 'local') === 'blender') return;
         const nextActive = !(target.active !== false);
         try {
             const updated = await API.updateGeofence(id, { active: nextActive });
@@ -392,6 +418,8 @@
 
     async function removeGeofence(id) {
         if (!confirm('Delete this geofence?')) return;
+        const target = geofences.find((gf) => gf.id === id);
+        if (target && (target.source || 'local') === 'blender') return;
         try {
             await API.deleteGeofence(id);
             geofences = geofences.filter((gf) => gf.id !== id);
