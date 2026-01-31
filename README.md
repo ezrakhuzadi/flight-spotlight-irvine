@@ -41,6 +41,12 @@ docker compose up -d
 
 Access at: http://localhost:5050
 
+### Dev Docker (live mounts)
+
+```bash
+docker compose -f docker-compose-dev.yml up
+```
+
 ### Bootstrap Users
 Set these in `.env` (or container env) to seed the first admin account:
 - `ATC_BOOTSTRAP_ADMIN_EMAIL`

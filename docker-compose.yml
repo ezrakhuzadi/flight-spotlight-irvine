@@ -2,23 +2,16 @@ version: "3"
 services:
   atc-frontend:
     platform: linux/amd64
-    command: npm start
     env_file:
       - .env
     environment:
       - BLENDER_URL=http://flight-blender:8000
+      - NODE_ENV=production
+      - PORT=5050
     build: .
     image: atc-frontend
     container_name: atc-frontend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./server.js:/usr/src/app/server.js # Mount server.js for live updates
-      - ./util:/usr/src/app/util # Mount util for dependencies
-      - ./routes:/usr/src/app/routes # Mount routes
-      - ./views:/usr/src/app/views # Mount local views for live editing
-      - ./static:/usr/src/app/static # Mount static assets including 3D models
-      - ./data:/usr/src/app/data # Persist user database
+    restart: unless-stopped
     ports:
       - "5050:5050"
     networks:
